@@ -45,6 +45,12 @@ echo ""
 
 # Parse the env file, treating PEM blocks (and other multiline values)
 # as a single variable.
+# Infra vars that up.sh sets to Railway-specific values (the internal DB host,
+# the service port). A copied .env.production often still carries a local
+# DB_HOST=localhost / context-db; pushing that would break the deploy. Skip
+# them here so up.sh stays the single owner of these.
+SKIP_KEYS=" DB_HOST PORT "
+
 count=0
 current_key=""
 current_value=""
@@ -75,6 +81,13 @@ ${line}"
     current_value="${current_value%\"}"
     current_value="${current_value#\'}"
     current_value="${current_value%\'}"
+
+    if [[ "$SKIP_KEYS" == *" ${current_key} "* ]]; then
+        echo -e "${DIM}  Skipping ${current_key} (managed by up.sh)${NC}"
+        current_key=""
+        current_value=""
+        continue
+    fi
 
     echo -e "${DIM}  Setting ${current_key}${NC}"
     railway variables --set "${current_key}=${current_value}" --service agent-os 2>/dev/null
