@@ -73,11 +73,17 @@ def context_tools(run_context: RunContext | None = None) -> list:
             tools += _skills.get_tools()
         # The approval gate on acting as the owner: tools that reach the
         # outside world (send email, change the calendar) pause the run for
-        # explicit confirmation before they execute. Set per run — providers
-        # build fresh tool objects on every get_tools() call.
+        # explicit confirmation before they execute. `approval_type="required"`
+        # makes that gate a *persisted, blocking* approval — agno writes a row
+        # to the approvals table at pause (status="pending") and refuses to
+        # continue the run until it's resolved, so every outward action leaves a
+        # durable audit trail (tool, args, who approved, when) and unattended
+        # (scheduled) sends queue up for the owner instead of acting unseen.
+        # Set per run — providers build fresh tool objects on every get_tools().
         for t in tools:
             if getattr(t, "name", None) in ACT_TOOLS:
                 t.requires_confirmation = True
+                t.approval_type = "required"
         return tools
     return list(GUEST_TOOLS)
 
