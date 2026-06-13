@@ -1,0 +1,63 @@
+services:
+  context-db:
+    image: agnohq/pgvector:18
+    container_name: context-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: ${DB_USER:-context}
+      POSTGRES_PASSWORD: ${DB_PASS:-context}
+      POSTGRES_DB: ${DB_DATABASE:-context}
+    networks:
+      - context
+
+  context-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: context-api
+    image: ${IMAGE_NAME:-context}:${IMAGE_TAG:-latest}
+    # --reload-dir limits the watcher to dirs that contain runtime code.
+    # Without this, edits under scripts/, tmp/ would restart uvicorn — disruptive when chatting.
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      --reload-dir agents --reload-dir app --reload-dir db --reload-dir skills
+      --reload-include SKILL.md
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      RUNTIME_ENV: dev
+      AGNO_DEBUG: "True"
+      WAIT_FOR_DB: "True"
+      AGENTOS_URL: http://127.0.0.1:8000
+      # Owner identity for local dev. Comma-separated;
+      # first entry is canonical (the user_id used for storing context).
+      # "anon" is the agent's unauthenticated sentinel.
+      OWNER_ID: ${OWNER_ID:-my@email.com,anon}
+      OWNER_NAME: ${OWNER_NAME:-Me}
+      DB_HOST: context-db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-context}
+      DB_PASS: ${DB_PASS:-context}
+      DB_DATABASE: ${DB_DATABASE:-context}
+    depends_on:
+      - context-db
+    networks:
+      - context
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  context:
+
+volumes:
+  pgdata:
