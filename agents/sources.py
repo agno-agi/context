@@ -24,6 +24,7 @@ from agno.context.wiki import FileSystemBackend, GitBackend, WikiContextProvider
 from agno.context.workspace import WorkspaceContextProvider
 from agno.run import RunContext
 from agno.tools import tool
+from agno.tools.workspace import DEFAULT_EXCLUDE_PATTERNS
 from agno.utils.log import log_info, log_warning
 
 from agents.instructions import CRM_READ, CRM_WRITE, KNOWLEDGE_READ, KNOWLEDGE_WRITE
@@ -112,7 +113,16 @@ def _create_web_provider() -> WebContextProvider:
 
 
 def _create_workspace_provider() -> WorkspaceContextProvider:
-    return WorkspaceContextProvider(root=REPO_ROOT, model=default_model())
+    # agno's defaults already exclude .env*, .git, caches, etc. Add the Google
+    # credential files: in local dev compose mounts the repo at /app, so without
+    # this the owner's own agent could read the minted token / service-account
+    # JSON back through query_workspace. (The image is clean — .dockerignore
+    # excludes them — this covers the mounted-dev case.)
+    return WorkspaceContextProvider(
+        root=REPO_ROOT,
+        model=default_model(),
+        exclude_patterns=[*DEFAULT_EXCLUDE_PATTERNS, "*_token.json", "google-service-account.json"],
+    )
 
 
 def _create_crm_provider() -> DatabaseContextProvider:

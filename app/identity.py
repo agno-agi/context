@@ -26,6 +26,7 @@ AgentOS's scheduler sends requests over HTTP that are authenticated using the OS
 from os import getenv
 
 from agno.run import RunContext
+from agno.utils.log import log_warning
 
 # Default user_id for unauthenticated requests.
 # Agno substitutes it before pre_hooks run, so an unauthenticated request (whose underlying user_id is None) arrives as this value.
@@ -37,8 +38,27 @@ ANON_USER_ID = "anon"
 SCHEDULER_USER_ID = "__scheduler__"
 
 
+# Reserved internal identities — never valid owner ids. `anon` is the
+# unauthenticated sentinel and `__scheduler__` is minted only by the auth layer
+# from the internal service token; letting either into OWNER_ID would hand the
+# owner surface to unauthenticated callers (in dev) or be redundant.
+_RESERVED_IDS = frozenset({ANON_USER_ID.casefold(), SCHEDULER_USER_ID.casefold()})
+
+
 def _parse_owner_ids(raw: str) -> list[str]:
-    return [part.strip() for part in raw.split(",") if part.strip()]
+    ids: list[str] = []
+    dropped: list[str] = []
+    for part in raw.split(","):
+        candidate = part.strip()
+        if not candidate:
+            continue
+        if candidate.casefold() in _RESERVED_IDS:
+            dropped.append(candidate)
+            continue
+        ids.append(candidate)
+    if dropped:
+        log_warning(f"OWNER_ID: ignoring reserved identity value(s) {dropped} — these are internal sentinels, not owners.")
+    return ids
 
 
 _OWNER_ID_RAW = getenv("OWNER_ID", "")

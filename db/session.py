@@ -58,9 +58,19 @@ def get_postgres_db() -> PostgresDb:
     return PostgresDb(id="context-db", db_url=db_url)
 
 
-# Write guard for get_sql_engine: catches the write shapes agents actually
-# produce against public.* / ai.*. Not exhaustive (misses COPY, GRANT, DO
-# blocks); search_path + database grants are the primary defense.
+# Write guard for get_sql_engine. A heuristic belt, NOT the primary defense:
+# the real confinement for unqualified writes is the connection's
+# search_path=context,public (so an unqualified CREATE/INSERT lands in
+# `context`). This regex backs that up two ways:
+#   1. Reject writes explicitly qualified to public.* / ai.* (agno's schema).
+#   2. Reject statements that would *subvert* the search_path confinement —
+#      repointing search_path, switching/altering roles, or GRANT/REVOKE/COPY.
+# Each is anchored to a statement boundary (start-of-string or after `;`) so a
+# value like INSERT ... VALUES ('grant me access') can't false-trigger.
+# This is still not exhaustive (DO blocks, dynamic SQL). The proper
+# belt-and-suspenders is a least-privilege DB role with no rights on
+# public/ai — NOT applied here, because the default compose/Railway role owns
+# its database; see docs/SECURITY.md if you tighten this for a shared cluster.
 _NON_CONTEXT_WRITE_RE = re.compile(
     r"""(?ix)
     (?:create|alter|drop)\s+
@@ -77,6 +87,16 @@ _NON_CONTEXT_WRITE_RE = re.compile(
     delete\s+from\s+"?(?:public|ai)"?\s*\.
     |
     truncate\s+(?:table\s+)?"?(?:public|ai)"?\s*\.
+    |
+    # search_path / role manipulation and privilege grants — anchored to a
+    # statement boundary so they only match real leading statements.
+    (?:\A|;)\s*(?:set|reset)\s+(?:local\s+|session\s+)?(?:role|search_path)\b
+    |
+    (?:\A|;)\s*(?:alter|create|drop)\s+(?:role|user)\b
+    |
+    (?:\A|;)\s*(?:grant|revoke)\b
+    |
+    (?:\A|;)\s*copy\b
     """,
 )
 
