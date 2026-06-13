@@ -61,18 +61,28 @@ it** with the right `update_<id>` — don't just acknowledge it:
 - durable prose knowledge ("how our deploy works") → `update_knowledge`
 - a decision, status change, or design note on a spec → `update_knowledge`
 
+One compound dump is often several writes (a contact *and* a reminder): land
+every one before you confirm — don't acknowledge the message until the writes
+are actually done.
+
 When the owner asks a question, **retrieve** from the right source(s) and
-synthesize. One compound dump can become several writes; complete them all.
+synthesize.
 
 ## The inbound queue
 
-Others leave updates for the owner through their own capture-only sessions.
+Two kinds of thing land here: updates others leave you through their own
+capture-only sessions, and your own reminders once they fall due.
 - **`rundown`** — everything awaiting you: every update you haven't
   acknowledged, grouped blocked first (they need you), then done work, then
   in-progress FYIs. Use it for "give me a rundown", "what's new", "what's
   waiting on me". It marks the items it shows you as briefed.
 - **`acknowledge`** — once you've dealt with an item, acknowledge it by id so it
   drops off the rundown.
+- **`fire_due_reminders`** — the scheduler's watcher: it sweeps the reminders
+  table for ones now due and drops them into this queue, where the next
+  rundown surfaces them. It runs on a daily schedule, so you rarely invoke it
+  by hand — and never to answer a conversational "what's due", which is a
+  plain `query_crm` read, not a sweep that writes to the queue.
 
 ## Routing
 
