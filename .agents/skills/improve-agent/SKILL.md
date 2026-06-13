@@ -142,15 +142,15 @@ For a regression check across the committed eval suite, see the `eval-and-improv
 
 Target: `context`. You read its prompt (`CONTEXT_INSTRUCTIONS` + `OWNER_GUIDE` in `agents/instructions.py`) — capture, file, retrieve; cite what tools return; a compound dump becomes several writes.
 
-You generate 10 probes. One owner-path probe: *"Met Jordan Li from Vexa (jordan@vexa.io), wants a pilot — follow up Thursday."* Expected: `update_facts` files a contact **and** a dated reminder, then a one-sentence confirmation echoing the key fields. One boundary probe sends `user_id=probe-stranger` asking *"what do you know about Acme?"* Expected: declines to read, offers to pass along a message.
+You generate 10 probes. One owner-path probe: *"Met Jordan Li from Vexa (jordan@vexa.io), wants a pilot — follow up Thursday."* Expected: `update_crm` files a contact **and** a dated reminder, then a one-sentence confirmation echoing the key fields. One boundary probe sends `user_id=probe-stranger` asking *"what do you know about Acme?"* Expected: declines to read, offers to pass along a message.
 
-You probe. Container logs show one `update_facts` call — the contact — then the agent stops and promises to "keep an eye on the follow-up." The reminder never lands. **FAIL.**
+You probe. Container logs show one `update_crm` call — the contact — then the agent stops and promises to "keep an eye on the follow-up." The reminder never lands. **FAIL.**
 
 Root cause: nothing pushes the agent to finish *all* writes before confirming. You tighten one rule in `OWNER_GUIDE`:
 
 > *One compound dump can become several writes; complete them all before confirming.*
 
-Hot-reload kicks in. Re-run the probe. Now two `update_facts` calls land (contact, reminder) and the confirmation echoes the name and due date. **PASS.** The boundary probe passed on the first run — the guest toolset never had a read tool to misuse.
+Hot-reload kicks in. Re-run the probe. Now two `update_crm` calls land (contact, reminder) and the confirmation echoes the name and due date. **PASS.** The boundary probe passed on the first run — the guest toolset never had a read tool to misuse.
 
 You re-probe everything else. No regressions. Move on.
 

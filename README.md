@@ -1,13 +1,13 @@
-# @context — your professional alter-ego
+# @context - your professional alter ego
 
-@context is a self-hosted professional alter-ego: it captures your work context and organizes it using a database and knowledge base. It's built with privacy and security as a design principle. You own everything — your keys, your cloud, your data.
+@context is a self-hosted professional alter ego: it captures your work context and organizes it using a database and knowledge base. @context is built with privacy and security as a first principle, you own everything — your keys, your cloud, your data.
 
 @context runs in two modes:
 
 1. **Owner mode:** all tools available: capture context (*"met Kyle from Agno, follow up next week"*), retrieve context (*"prep me for the 2pm"*), prepare context (*"process today"*)
-2. **Guest mode:** teammates (*and their agents*) can leave an update in your queue. Guests can only add context, never retrieve it.
+2. **Guest mode:** teammates (*and their agents*) can leave updates in your queue. Guests can only add context, never retrieve it.
 
-@context runs on Agno's AgentOS runtime, so user identity is verified on every request in production. The boundary between the two modes is enforced via code by only adding tools based on the user's role (owner vs guest).
+@context runs on Agno's AgentOS runtime, so user identity is verified on every request. The boundary between the two modes is enforced via code by only adding tools based on the user's role (owner vs guest).
 
 > Built on [Agno](https://docs.agno.com).
 
@@ -107,6 +107,7 @@ There are also a few other agent files that are worth reviewing:
 - [`agents/instructions.py`](agents/instructions.py) defines the instructions for the agent based on the caller's role (owner vs guest).
 - [`agents/sources.py`](agents/sources.py) defines the context providers available to the agent (crm, knowledge, workspace, web, Slack, Gmail, Calendar) and how each registers its `query_` / `update_` tools.
 - [`agents/inbox.py`](agents/inbox.py) defines the inbound queue: `submit_update` (anyone) → `rundown` / `acknowledge` (you only).
+- [`agents/reminders.py`](agents/reminders.py) defines the reminder sweep: `fire_due_reminders` files due reminders into the inbound queue, run on a daily schedule.
 - [`agents/policy.py`](agents/policy.py) defines the pre-hook and tool-hook that enforce the owner/guest boundary.
 
 ### The skills
@@ -197,8 +198,8 @@ This is where the alter-ego gets hands. With Google credentials configured, `que
 
 ## Extending
 
-- **The daily rundown.** `scheduler=True` is on. Schedule a morning digest of meetings (next 7d) and due/overdue reminders, posted to Slack. Scheduled runs carry the scheduler's verified identity and run with your owner surface — set up once, briefed every morning. See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler).
-- **More sources.** See [Add a source](#add-a-source). The wiki can move from local files to a Git backend (durable, audited) by setting `WIKI_REPO_URL` + `WIKI_GITHUB_TOKEN`.
+- **Scheduled runs.** `scheduler=True` is on, and one schedule ships registered: `fire-due-reminders` sweeps due reminders into your inbound queue every morning (see [`agents/reminders.py`](agents/reminders.py)). Add your own — e.g. a daily-rundown digest of meetings (next 7d) and due/overdue reminders posted to Slack. Scheduled runs carry the scheduler's verified identity and run with your owner surface. See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler).
+- **More sources.** See [Adding a source](AGENTS.md#adding-a-source-the-common-extension). The wiki can move from local files to a Git backend (durable, audited) by setting `WIKI_REPO_URL` + `WIKI_GITHUB_TOKEN`.
 - **The MCP read path.** The next bet: expose `query_*` over MCP, so your *other* agents — Claude Code, Cursor, whatever you run — can read through your @context instead of starting cold. The asymmetry already covers it: their reads ride your verified identity.
 - **Build with coding agents.** The repo ships **coding-agent workflows** (in [`.agents/skills/`](.agents/skills/), symlinked into `.claude/` for Claude Code) for the agent-development lifecycle — `/extend-agent`, `/improve-agent`, `/eval-and-improve`, `/review-and-improve`. These are distinct from the runtime skills under [`skills/`](skills/): they run in *your* coding agent and edit @context's code, not in the deployed agent. Because the code, traces, and iteration tools all live in one place, a coding agent can read, change, and harden @context end to end.
 

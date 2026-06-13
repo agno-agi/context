@@ -56,8 +56,8 @@ process, or pinned via `INTERNAL_SERVICE_TOKEN` for multi-replica deploys). The
 auth middleware resolves that token to the verified identity `"__scheduler__"`,
 and — like a JWT `sub` — the run route prefers it over any payload `user_id`.
 `is_owner` accepts it whenever an owner is configured: scheduled playbooks (the
-daily rundown) are the owner's own automation, so they run with the owner
-surface and key their writes under the canonical id. The trust chain: only the
+`fire-due-reminders` sweep) are the owner's own automation, so they run with the
+owner surface and key their writes under the canonical id. The trust chain: only the
 in-process scheduler holds the token, and *creating* schedules requires
 authenticated access to the OS routes in the first place.
 
@@ -82,7 +82,7 @@ callable `tools=` resolved per run (`cache_callables=False`):
 def context_tools(run_context):
     if not is_owner(run_context):
         return [submit_update]              # capture-only
-    return [*all_provider_tools(), list_contexts, rundown, acknowledge]  # full
+    return [*all_provider_tools(), list_contexts, rundown, acknowledge, fire_due_reminders]  # full
 ```
 
 The model **never sees** the privileged tools for a guest — so "don't answer
