@@ -24,7 +24,7 @@
 
    @context runs these playbooks on demand or on a schedule: the daily rundown and weekly plan will DM the brief straight to you.
 4. **Represent you.** Your teammates (and their agents) can share non-urgent updates with your @context. A teammate types *"@your-context my claude fixed the auth bug"* and it's saved to your queue - surfacing in your next rundown. It works outbound too: your @context can message people and channels on Slack on your behalf, and @-mention a teammate's @context to drop an update in *their* queue - which is how a team's contexts talk to each other (the [context network](docs/NETWORK.md)). This keeps your signal-to-noise high.
-5. **Act, with your approval.** Connect [Gmail and Calendar](docs/GOOGLE.md) and it can send follow-ups and put meetings on your calendar. Tools that take external actions explicitly wait for your approval on the AgentOS UI before they execute.
+5. **Draft and schedule.** Connect [Gmail and Calendar](docs/GOOGLE.md) and @context reads your real inbox and calendar, drafts your follow-ups straight into Gmail for you to send, and sends calendar changes to your approvals queue. It only ever *drafts* email — it never sends on its own.
 
 ## Security
 
@@ -36,7 +36,7 @@ Agno's AgentOS makes it possible to:
 
 This security model enables us to design a system that permits anyone to write to it but only you can read or act through it. To everyone else it is a polite notetaker that only captures. Although it does remember who it is talking to: each caller gets their own user-memory, kept entirely separate from yours.
 
-To push our security boundary even further, tools that take external actions like sending an email or changing your calendar pause for explicit approval before they run. AgentOS makes this possible with the `requires_confirmation` and `approval_type="required"` settings on sensitive tools like `update_gmail` and `update_calendar`.
+To push our security boundary even further, acting in the outside world is gated. Changing your calendar (`update_calendar`) pauses for explicit approval before it runs — AgentOS's `requires_confirmation` / `approval_type="required"` settings. Email goes a step further: `update_gmail` can *only* draft (it never sends), so the follow-up waits in your Gmail drafts for you to review and send.
 
 Finally, everything runs locally or in your own cloud, inside your VPC, with every byte of data (context's database, context's knowledge base, context's inbox) being stored in your own database.
 
@@ -235,9 +235,9 @@ Here are the runtime skills that are included in the repo:
 
 ## Connect Gmail and Calendar
 
-With Google credentials configured, `query_gmail` / `query_calendar` ground the rundown and meeting prep in your real inbox and calendar. `update_gmail` / `update_calendar` draft the follow-up or book the slot, pausing for your approval before anything leaves.
+With your Gmail connected, `query_gmail` / `query_calendar` ground the rundown and meeting prep in your real inbox and calendar. `update_gmail` writes the follow-up **as a draft in your Gmail** — you review, edit, and send it yourself; it never sends on its own. `update_calendar` proposes events and changes, which land in your approvals queue (the approvals page in the AgentOS UI) for you to confirm.
 
-Acting as you is double-gated: the act tools exist only in your toolset, and every call requires your explicit confirmation. [`docs/GOOGLE.md`](docs/GOOGLE.md) covers both auth paths (OAuth for personal accounts, service account for Workspace deploys).
+So reading and prep are frictionless, and the one outward step stays yours. [`docs/GOOGLE.md`](docs/GOOGLE.md) is the few-minute setup (and how to keep the tokens from expiring).
 
 ## Evals
 
@@ -261,13 +261,12 @@ python -m evals --case <name>  # one case
 | `RUNTIME_ENV` | no | `prd` | `dev` enables hot-reload and disables JWT. Compose sets this to `dev` for local. |
 | `JWT_VERIFICATION_KEY` | prd | none | Public key from os.agno.com. Required when `RUNTIME_ENV=prd`. |
 | `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production. |
-| `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Set it when running more than one replica behind one URL. |
+| `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Set it when running more than one replica behind one URL — see [`docs/SCALING.md`](docs/SCALING.md). |
 | `PARALLEL_API_KEY` | no | none | Switches the `web` source from keyless Parallel MCP to the authenticated SDK (higher rate ceiling). |
 | `SLACK_BOT_TOKEN` / `SLACK_SIGNING_SECRET` | no | none | Both enable the Slack interface. The bot token alone activates the `slack` source (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests. See [`docs/SLACK.md`](docs/SLACK.md). |
 | `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` | no | `0 13 * * *` / `0 22 * * 0` | UTC cron for the Slack-delivered daily rundown and weekly plan (only armed when Slack is set). See [`docs/SLACK.md`](docs/SLACK.md). |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` / `GOOGLE_DELEGATED_USER` | no | none | Service-account path for the `gmail` + `calendar` sources (Workspace, headless). See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
-| `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | no | none | The service-account key, base64, for platforms without secret-file mounts. The entrypoint materializes it. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | none | OAuth client for the `gmail` + `calendar` sources (personal accounts, tokens minted locally). |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | none | Connect your Gmail + Calendar; mint tokens with `python scripts/google_mint_tokens.py`. See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
+| `GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64` | no | none | Minted Gmail/Calendar tokens as base64, so they survive a deploy. The entrypoint restores them at startup. See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
 | `KNOWLEDGE_REPO_URL` / `KNOWLEDGE_GITHUB_TOKEN` | no | none | Set both to back the `knowledge` base with a Git repo instead of local files. Optional knobs: `KNOWLEDGE_BRANCH` (default `main`), `KNOWLEDGE_LOCAL_PATH`. |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_DATABASE` | no | matches compose | Postgres connection. |
 | `DB_DRIVER` | no | `postgresql+psycopg` | SQLAlchemy driver. |

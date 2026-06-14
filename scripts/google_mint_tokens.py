@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-@context Google token minter — the OAuth (personal-account) auth path.
+@context Google token minter — connects your Gmail + Calendar.
 
 The OAuth consent flow opens a browser, so it can't run in the container — you
 mint the tokens once on your machine and the dev container picks them up through
@@ -12,11 +12,8 @@ Usage (from the repo root, with the venv active — ./scripts/venv_setup.sh):
 
     python scripts/google_mint_tokens.py
 
-Prereqs in .env (see docs/GOOGLE.md, "Path 1: OAuth"):
+Prereqs in .env (see docs/GOOGLE.md):
     GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_PROJECT_ID
-
-On a Google Workspace account, prefer the headless service-account path instead:
-    ./scripts/google_setup.sh
 
 The tokens are written to GMAIL_TOKEN_FILE / CALENDAR_TOKEN_FILE (or the repo
 root by default) — gitignored. Your browser opens twice; approve both.
@@ -30,7 +27,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 # The scopes the Gmail + Calendar providers use. Minted as the union of read +
 # write so the read and write sub-agents can share one token file per service.
-# Kept in sync with docs/GOOGLE.md and the delegation scopes in google_setup.sh.
+# Kept in sync with docs/GOOGLE.md.
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.modify",
@@ -69,20 +66,10 @@ def main() -> int:
 
     _load_dotenv()
 
-    # The service-account path skips OAuth entirely (the providers prefer it when
-    # GOOGLE_SERVICE_ACCOUNT_FILE is set), so minting here would be a no-op.
-    if getenv("GOOGLE_SERVICE_ACCOUNT_FILE"):
-        print(
-            "GOOGLE_SERVICE_ACCOUNT_FILE is set — you're on the service-account path,\n"
-            "which doesn't use OAuth tokens. Nothing to mint. (Unset it to mint OAuth\n"
-            "tokens, or run ./scripts/google_setup.sh for the service-account setup.)"
-        )
-        return 0
-
     missing = [k for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET") if not getenv(k)]
     if missing:
         print(f"Missing required env: {', '.join(missing)}.")
-        print("Set the OAuth client in .env — see docs/GOOGLE.md (Path 1: OAuth).")
+        print("Set the OAuth client in .env — see docs/GOOGLE.md.")
         return 1
 
     from agents.sources import calendar_token_path, gmail_token_path

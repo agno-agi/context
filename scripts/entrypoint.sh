@@ -38,17 +38,7 @@ if [[ "$WAIT_FOR_DB" = true || "$WAIT_FOR_DB" = True ]]; then
     echo ""
 fi
 
-# Google service account via env — for platforms with no secret-file mounts
-# (Railway). Base64 the JSON key into GOOGLE_SERVICE_ACCOUNT_JSON_B64 and the
-# entrypoint materializes it; an explicit GOOGLE_SERVICE_ACCOUNT_FILE wins.
-if [[ -n "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" && -z "$GOOGLE_SERVICE_ACCOUNT_FILE" ]]; then
-    echo "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 -d > /app/google-service-account.json
-    export GOOGLE_SERVICE_ACCOUNT_FILE=/app/google-service-account.json
-    echo -e "    ${DIM}Google service account written from GOOGLE_SERVICE_ACCOUNT_JSON_B64.${NC}"
-    echo ""
-fi
-
-# OAuth token caches via env — same idea for the OAuth path. The token files
+# Gmail/Calendar OAuth token caches via env — the token files
 # don't survive a redeploy on a baked image (Railway), so ship them as base64
 # and the entrypoint restores them at startup. Paths mirror the defaults in
 # agents/sources.py (GMAIL_TOKEN_FILE / CALENDAR_TOKEN_FILE override them). A

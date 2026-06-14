@@ -21,7 +21,7 @@ deploy: their database, their knowledge base, their keys.
 |---|---|---|
 | The owner's stored context (CRM, knowledge base, queue) | Any guest caller reading it | Identity-conditioned toolset — guests get no read tools |
 | The ack axis (what's "handled") | Anyone but the owner marking items done/acknowledged | Only the owner's toolset has the ack tool |
-| Acting *as* the owner (sending mail, changing the calendar) | The model doing it unprompted; guests triggering it | Owner-only act tools + a per-call approval gate — the run pauses until the owner confirms (L6) |
+| Acting *as* the owner (changing the calendar) | The model doing it unprompted; guests triggering it | Owner-only act tool + a per-call approval gate — the run pauses until the owner confirms (L6). Email is draft-only, so @context never sends. |
 | Identity itself | A caller or the model forging "I am the owner" | Trusted identity from verified JWT / Slack HMAC, not the request body |
 | Data at rest | Cross-user reads via the OS REST API | `user_isolation` + `user_id`-scoped engines |
 
@@ -170,21 +170,22 @@ of the toolset:
 
 ### L6 — Acting as the owner requires explicit approval
 
-Reading and filing stay inside the owner's own store. **Act tools** reach the
-outside world *in the owner's name* — `update_gmail` sends email, `update_calendar`
-changes the real calendar — so they get a second gate on top of L1:
+Reading and filing stay inside the owner's own store. Two write tools reach
+*the owner's name*, and they're handled differently by design:
 
-- **Owner-only by construction (L1).** A guest's toolset never contains an
-  act tool, same as every other privileged tool.
-- **Approval-gated per call.** [`context_tools()`](../agents/context.py) flags
-  every tool named in `ACT_TOOLS` ([`agents/sources.py`](../agents/sources.py))
-  with `requires_confirmation` — agno pauses the run *before the tool executes*
-  and resumes only when the owner confirms (in the os.agno.com chat UI, or via
-  the continue-run API). The model cannot self-approve; declining discards the
-  call.
-- **Conservative sub-agents.** The Gmail write sub-agent drafts by default and
-  sends only on an explicit "send"; the Calendar write sub-agent confirms
-  ambiguous targets before touching events.
+- **Email is draft-only.** `update_gmail` can only create or edit a Gmail
+  **draft** — the send tools are stripped from its write toolkit
+  ([`_create_gmail_provider`](../agents/sources.py)), so @context physically
+  cannot send. A draft is private and reversible (it waits in your Drafts until
+  *you* send it), so it's *not* an act tool and needs no gate. The review step
+  is the draft itself — stronger than an approval popup, because you can fix the
+  wording before it goes.
+- **Calendar is approval-gated.** `update_calendar` changes the real calendar,
+  so it's the one tool in `ACT_TOOLS`. [`context_tools()`](../agents/context.py)
+  flags it `requires_confirmation` — agno pauses the run *before it executes*
+  and resumes only when the owner confirms (in the os.agno.com chat UI / the
+  approvals queue, or via the continue-run API). The model cannot self-approve;
+  declining discards the call.
 
 **Messaging is not an act tool — it's ungated by design.** `update_slack` (post
 to a channel, reply in a thread, DM a teammate, @-mention another person's
@@ -192,18 +193,21 @@ to a channel, reply in a thread, DM a teammate, @-mention another person's
 ordinary communication, not a high-stakes action taken *as* the owner, so it runs
 ungated like any chat reply. It stays **owner-only** the same way every write tool
 does (L1) — a guest never holds it — but it does **not** pause for approval. The
-approval gate is reserved for the genuinely sensitive outward actions: sending
-mail as the owner, mutating the calendar. This ungated messaging is exactly what
+approval gate is reserved for the one genuinely sensitive outward action —
+mutating the calendar (email only ever drafts, so it isn't gated). This ungated messaging is exactly what
 lets contexts talk to each other, the context network — see [`docs/NETWORK.md`](NETWORK.md). (A
 scheduled **digest** rides a separate, also-ungated path: it DMs the owner
 *themselves* via `agents/notify.py`, which is self-notification, not an outward
 act.)
 
 The asymmetry extends cleanly: *anyone can write **to** your context; only you
-can read it — and nothing **sensitive** acts **as** you without your sign-off.* A
-scheduled run that reaches a gated act tool (mail, calendar) pauses too — there's
-no one to approve mid-schedule, so unattended automation can read, file, and
-message, but never send mail or change the calendar.
+can read it — and nothing **sensitive** leaves **as** you without your sign-off.* You
+send the email yourself (it's only ever a draft); the one gated action is the
+calendar. A scheduled run that reaches the calendar act tool pauses too — there's
+no one to approve mid-schedule, so unattended automation can read, draft, file,
+and message, but never change the calendar. (To let @context send email for you,
+re-enable the send tools and add `update_gmail` to `ACT_TOOLS` so sends are
+approval-gated like the calendar — see [`docs/GOOGLE.md`](GOOGLE.md).)
 
 ---
 
@@ -243,6 +247,5 @@ message, but never send mail or change the calendar.
   trust class as handing someone your deploy. (Act tools still pause for
   approval even on scheduled runs.)
 - **Google credentials are deploy-held.** The Gmail/Calendar providers act
-  with whatever scopes the configured service account or OAuth token carries —
-  scope them to the one mailbox/calendar they should touch
-  (see [`docs/GOOGLE.md`](GOOGLE.md)).
+  with whatever scopes the connected OAuth token carries — scope them to the
+  one mailbox/calendar they should touch (see [`docs/GOOGLE.md`](GOOGLE.md)).

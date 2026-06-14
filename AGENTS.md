@@ -22,9 +22,9 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │   ├── workspace  WorkspaceContextProvider       this repo's files                  R    always on
 │   ├── web        WebContextProvider             Parallel (SDK or keyless MCP)      R    always on
 │   ├── slack      SlackContextProvider           channel / DM history; send = update_slack (ungated)  R/W  SLACK_BOT_TOKEN set
-│   ├── gmail      GmailContextProvider           inbox; send = act tool (approval)  R/W* GOOGLE_* set
+│   ├── gmail      GmailContextProvider           inbox; update_gmail drafts only     R/W  GOOGLE_* set
 │   └── calendar   GoogleCalendarContextProvider  events; write = act tool (approval) R/W* GOOGLE_* set
-│        (*act tools — update_gmail / update_calendar — pause for per-call owner approval; update_slack is NOT an act tool — messaging is ungated)
+│        (*act tool — update_calendar — pauses for per-call owner approval. update_gmail only drafts (never sends), update_slack is ordinary messaging — both ungated.)
 │
 ├── Inbound queue (agents/inbox.py)             submit_update / rundown / acknowledge
 │
@@ -70,11 +70,11 @@ Shared:
 | [`evals/__main__.py`](evals/__main__.py) | `python -m evals` runner — runs each case (or the deterministic gate), wiring Agno's `AgentAsJudgeEval` + `ReliabilityEval` with a trace-level capture-only check; one event loop, judge/reliability results to `eval_db`. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | The owner/guest security & authorization design — including act tools and the approval gate. |
 | [`docs/SLACK.md`](docs/SLACK.md) | Slack setup — app manifest, identity resolution, both sides of the boundary. |
-| [`docs/GOOGLE.md`](docs/GOOGLE.md) | Gmail + Calendar setup — both auth paths, token minting, the act-tool approval flow. |
+| [`docs/GOOGLE.md`](docs/GOOGLE.md) | Gmail + Calendar setup — connect your Gmail, draft-only email, the keep-the-token-alive step. |
 | [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) | The `knowledge` base — the folder-per-spec prose store, the read/write split, filesystem vs Git backing (`KNOWLEDGE_*`). |
 | [`docs/CRM.md`](docs/CRM.md) | The `crm` structured store — the `crm` schema tables, filing rules, and the write-guard/read-only boundary. |
 | [`compose.yaml`](compose.yaml) | Docker Compose for local development. |
-| [`railway.json`](railway.json) | Railway deploy config (Docker + 2 replicas + 4Gi/2vCPU). |
+| [`railway.json`](railway.json) | Railway deploy config (Docker + 1 replica + 4Gi/2vCPU; scale in [`docs/SCALING.md`](docs/SCALING.md)). |
 
 ## The owner/guest security model
 
@@ -82,7 +82,7 @@ This is the heart of the product — read [`docs/SECURITY.md`](docs/SECURITY.md)
 
 One deliberate exception rides outside the identity-conditioned toolset: the agent's `learning=LearningMachine(...)` (user profile + user memory, agentic mode) hands **every** caller two learning tools — `update_user_memory` and `update_profile` — so @context remembers the people (and agents) who talk to it. Memories and profile fields are keyed to the caller's own verified `user_id` and surface only on that caller's later runs — a teammate's memories never touch the owner's data, so this adds no read path across the boundary.
 
-Act tools get a second gate on top of the toolset: the tools named in `ACT_TOOLS` ([`agents/sources.py`](agents/sources.py) — `update_gmail`, `update_calendar`) are flagged `requires_confirmation` per run in [`context_tools()`](agents/context.py), so the run pauses for the owner's explicit approval before anything outward-facing executes. When you add a *sensitive* act-on-the-world tool, add it to `ACT_TOOLS` — don't ship one ungated. The deliberate exception is **`update_slack`**: sending a Slack message is ordinary communication, not a sensitive act, so it's intentionally left out of `ACT_TOOLS` and runs ungated (still owner-only, since it rides the provider surface). This ungated messaging is what powers the context network (agents messaging each other) — see [`docs/NETWORK.md`](docs/NETWORK.md). The full enforcement layers, threat model, and trust roots live in [`docs/SECURITY.md`](docs/SECURITY.md).
+Act tools get a second gate on top of the toolset: the tools named in `ACT_TOOLS` ([`agents/sources.py`](agents/sources.py) — just `update_calendar`) are flagged `requires_confirmation` per run in [`context_tools()`](agents/context.py), so the run pauses for the owner's explicit approval before the calendar changes. Two writes are deliberately ungated: `update_gmail` only ever drafts (it never sends — the send tools are stripped from its write toolkit, and a draft is private and reversible), and `update_slack` is ordinary communication, not a sensitive act (still owner-only, since it rides the provider surface). This ungated messaging is what powers the context network (agents messaging each other) — see [`docs/NETWORK.md`](docs/NETWORK.md). When you add a *sensitive* act-on-the-world tool, add it to `ACT_TOOLS` — don't ship one ungated. The full enforcement layers, threat model, and trust roots live in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Development Setup
 
@@ -174,16 +174,13 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 | `RUNTIME_ENV` | no | `prd` | `dev` enables hot-reload and disables JWT. Compose sets this to `dev` for local. |
 | `JWT_VERIFICATION_KEY` | prd | — | Public key from os.agno.com. Required when `RUNTIME_ENV=prd` and `authorization=True`. |
 | `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production so cron triggers reach AgentOS. |
-| `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Auto-generated per process; pin it when running multiple replicas behind one URL (railway.json ships two). |
+| `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Auto-generated per process; pin it when running more than one replica behind one URL (railway.json ships one by default — see [`docs/SCALING.md`](docs/SCALING.md)). |
 | `PARALLEL_API_KEY` | no | — | Switches the `web` provider from the keyless Parallel MCP endpoint to the authenticated Parallel SDK (higher rate ceiling). |
 | `SLACK_BOT_TOKEN` | no | — | Bot token. Activates the `slack` provider on its own (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests; set with the signing secret to enable the Slack interface ([`docs/SLACK.md`](docs/SLACK.md)). |
 | `SLACK_SIGNING_SECRET` | no | — | Signing secret. Both must be set for the interface to load. |
 | `DAILY_DIGEST_CRON` | no | `0 13 * * *` | UTC cron for the Slack-delivered daily rundown digest (only armed when `SLACK_BOT_TOKEN` is set). |
 | `WEEKLY_DIGEST_CRON` | no | `0 22 * * 0` | UTC cron for the Slack-delivered weekly week-plan digest (only armed when `SLACK_BOT_TOKEN` is set). |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | no | — | Service-account JSON key path — activates the `gmail` + `calendar` providers (headless; Gmail needs `GOOGLE_DELEGATED_USER`). See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
-| `GOOGLE_DELEGATED_USER` | no | — | The mailbox/calendar the service account acts as (domain-wide delegation). |
-| `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | no | — | The key as base64 for platforms without secret-file mounts — the entrypoint materializes it and sets `GOOGLE_SERVICE_ACCOUNT_FILE`. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | — | OAuth client for the `gmail` + `calendar` providers (personal accounts; mint the consent tokens with `python scripts/google_mint_tokens.py` — [`docs/GOOGLE.md`](docs/GOOGLE.md)). |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | — | Connects the `gmail` + `calendar` providers — mint the consent tokens with `python scripts/google_mint_tokens.py` ([`docs/GOOGLE.md`](docs/GOOGLE.md)). |
 | `GMAIL_TOKEN_FILE` / `CALENDAR_TOKEN_FILE` | no | `<repo>/gmail_token.json`, `<repo>/calendar_token.json` | Where the OAuth token caches live (read by the providers, written by the mint script). |
 | `GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64` | no | — | The minted OAuth tokens as base64, for platforms without secret-file mounts — the entrypoint restores them to the token-file paths at startup (so OAuth survives a redeploy). |
 | `KNOWLEDGE_REPO_URL` | no | — | Set with `KNOWLEDGE_GITHUB_TOKEN` to back the `knowledge` base with a Git repo (durable, audit trail) instead of the local filesystem. Point it at your specs repo — see "The knowledge base". |
@@ -212,7 +209,7 @@ Hand the scheduler any other agent / workflow + a cron expression to add more. N
 - **Maintenance** — purge acknowledged updates older than N days; vacuum tables.
 - **Periodic re-evaluation** — run `python -m evals` weekly to catch regressions.
 
-Identity: the scheduler authenticates its run triggers with AgentOS's internal service token, and those runs arrive as the verified `__scheduler__` identity — which [`is_owner`](app/identity.py) honors as the owner (once `OWNER_ID` is set), so scheduled playbooks get the owner surface and key their writes under the canonical id. The gated act tools (mail, calendar) still pause for approval, so unattended runs can read, file, and message on Slack but never send mail or change the calendar. Running >1 replica? Pin `INTERNAL_SERVICE_TOKEN`. See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler) for the cron API.
+Identity: the scheduler authenticates its run triggers with AgentOS's internal service token, and those runs arrive as the verified `__scheduler__` identity — which [`is_owner`](app/identity.py) honors as the owner (once `OWNER_ID` is set), so scheduled playbooks get the owner surface and key their writes under the canonical id. The gated act tool (calendar) still pauses for approval, so unattended runs can read, draft, file, and message on Slack but never change the calendar. Running >1 replica? Pin `INTERNAL_SERVICE_TOKEN`. See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler) for the cron API.
 
 ## Slack
 
@@ -222,12 +219,9 @@ The bot token alone (no signing secret) still activates the `slack` provider, wh
 
 ## Gmail + Google Calendar
 
-Configure Google credentials (either auth path) and the `gmail` + `calendar` providers are added to the registry — `query_gmail` / `query_calendar` for reads, `update_gmail` / `update_calendar` as approval-gated act tools. Two scripts cover setup:
+Set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` and mint the consent tokens once with `python scripts/google_mint_tokens.py`, and the `gmail` + `calendar` providers join the registry — `query_gmail` / `query_calendar` for reads, `update_gmail` / `update_calendar` for writes. **`update_gmail` only ever drafts** (it never sends — you send from Gmail), so it isn't gated; **`update_calendar`** is approval-gated, so calendar changes land in your approvals queue.
 
-- **Service account (Workspace, headless — deploys):** `./scripts/google_setup.sh` provisions the GCP project, enables the Gmail + Calendar APIs, creates the service account + key (auto-overriding the key-creation org policy if needed), and prints the Client ID + scopes for the one manual step — the domain-wide delegation grant in the Workspace admin console.
-- **OAuth (personal accounts — local):** `python scripts/google_mint_tokens.py` loads `.env`, runs the browser consent flow, and writes the Gmail + Calendar token caches.
-
-Token caches live at `gmail_token.json` / `calendar_token.json` (override with `GMAIL_TOKEN_FILE` / `CALENDAR_TOKEN_FILE`; resolved in one place by `gmail_token_path()` / `calendar_token_path()` in [`agents/sources.py`](agents/sources.py)). On Railway, ship the SA key or the tokens as base64 (`GOOGLE_SERVICE_ACCOUNT_JSON_B64` / `GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64`) and the [entrypoint](scripts/entrypoint.sh) restores them at startup. Full setup, the approval flow, and troubleshooting live in [`docs/GOOGLE.md`](docs/GOOGLE.md); the act-tool design is in [`docs/SECURITY.md`](docs/SECURITY.md) (L6).
+Token caches live at `gmail_token.json` / `calendar_token.json` (override with `GMAIL_TOKEN_FILE` / `CALENDAR_TOKEN_FILE`; resolved in one place by `gmail_token_path()` / `calendar_token_path()` in [`agents/sources.py`](agents/sources.py)). On Railway, ship the tokens as base64 (`GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64`) and the [entrypoint](scripts/entrypoint.sh) restores them at startup. Full setup (including how to stop the tokens expiring), the draft-only design, and troubleshooting live in [`docs/GOOGLE.md`](docs/GOOGLE.md); the act-tool design is in [`docs/SECURITY.md`](docs/SECURITY.md) (L6).
 
 ## Deploying to Railway
 

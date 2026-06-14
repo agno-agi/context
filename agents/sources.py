@@ -6,9 +6,9 @@ Wiring for the context providers available to Context. The structured database (
 
 Each provider exposes at most two tools to the main agent — `query_<id>` and `update_<id>` — so the tool surface stays linear at 2N as sources grow.
 
-`ACT_TOOLS` names the tools that act on the outside world *as the owner* (sending email, changing the calendar). `agents.context` flags them `requires_confirmation` so the run pauses for the owner's explicit approval before they execute — filing into your own store is frictionless; acting outward is gated (see `docs/SECURITY.md`).
+`ACT_TOOLS` names the tools that act on the outside world *as the owner* — just `update_calendar` (changing the real calendar). `agents.context` flags it `requires_confirmation` so the run pauses for the owner's explicit approval before it executes. Gmail is deliberately *not* here: `update_gmail` only ever drafts (it never sends), and a draft is private and reversible, so it needs no gate (see `_create_gmail_provider`). Filing into your own store is frictionless; acting outward is gated (see `docs/SECURITY.md`).
 
-Slack messaging (`update_slack`) is deliberately **not** in `ACT_TOOLS`: posting a message — to a teammate, a channel, or another person's `@context` agent — is ordinary, low-stakes communication, so it runs ungated like a chat reply. The approval gate is reserved for the sensitive outward actions (sending mail as the owner, mutating the calendar). `update_slack` stays owner-only the same way every read/write tool does — it's added only in the owner branch of `context_tools`, so a guest never holds it.
+Slack messaging (`update_slack`) is deliberately **not** in `ACT_TOOLS`: posting a message — to a teammate, a channel, or another person's `@context` agent — is ordinary, low-stakes communication, so it runs ungated like a chat reply. The approval gate is reserved for the sensitive outward action (mutating the calendar). `update_slack` stays owner-only the same way every read/write tool does — it's added only in the owner branch of `context_tools`, so a guest never holds it.
 """
 
 import asyncio
@@ -41,9 +41,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 KNOWLEDGE_PATH = REPO_ROOT / "knowledge"
 
 # Tools that take action in the outside world as the owner. `agents.context` flags these `requires_confirmation` per run, so the model can never execute one without the owner's explicit approval.
-# Note: `update_slack` is intentionally absent — sending a Slack message is treated
-# as ordinary messaging (ungated), not a sensitive act. Only mail + calendar gate.
-ACT_TOOLS: frozenset[str] = frozenset({"update_gmail", "update_calendar"})
+# `update_gmail` is intentionally absent: it's draft-only (see `_create_gmail_provider`), and a draft is harmless, so it isn't gated. `update_slack` is also absent — sending a Slack message is ordinary messaging (ungated), not a sensitive act. Only the calendar gates.
+ACT_TOOLS: frozenset[str] = frozenset({"update_calendar"})
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +118,11 @@ def _create_web_provider() -> WebContextProvider:
 
 
 def _create_workspace_provider() -> WorkspaceContextProvider:
-    # agno's defaults already exclude .env*, .git, caches, etc. Add the Google
-    # credential files: in local dev compose mounts the repo at /app, so without
-    # this the owner's own agent could read the minted token / service-account
-    # JSON back through query_workspace. (The image is clean — .dockerignore
-    # excludes them — this covers the mounted-dev case.)
+    # agno's defaults already exclude .env*, .git, caches, etc. Also keep Google
+    # credential files out: in local dev compose mounts the repo at /app, so
+    # without this the owner's own agent could read the minted OAuth token (or a
+    # stray key file) back through query_workspace. (The image is clean —
+    # .dockerignore excludes them — this covers the mounted-dev case.)
     return WorkspaceContextProvider(
         root=REPO_ROOT,
         model=default_model(),
@@ -216,15 +215,11 @@ def _create_slack_provider() -> SlackContextProvider | None:
 
 
 def _google_configured() -> bool:
-    """True when either Google auth path is configured.
+    """True when the Gmail/Calendar OAuth client is configured.
 
-    Service account (headless, recommended for deploys):
-    ``GOOGLE_SERVICE_ACCOUNT_FILE`` (+ ``GOOGLE_DELEGATED_USER`` for Gmail).
-    OAuth (personal accounts): ``GOOGLE_CLIENT_ID`` + ``GOOGLE_CLIENT_SECRET``,
-    with the consent token minted locally first — see ``docs/GOOGLE.md``.
+    Set ``GOOGLE_CLIENT_ID`` + ``GOOGLE_CLIENT_SECRET`` and mint the consent
+    tokens once with ``scripts/google_mint_tokens.py`` — see ``docs/GOOGLE.md``.
     """
-    if getenv("GOOGLE_SERVICE_ACCOUNT_FILE"):
-        return True
     return bool(getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"))
 
 
@@ -244,7 +239,9 @@ def calendar_token_path() -> str:
 
 
 def _create_gmail_provider() -> ContextProvider | None:
-    """Gmail — read + write. ``update_gmail`` is an act tool (approval-gated).
+    """Gmail — read + draft. ``update_gmail`` only ever creates a draft; it
+    never sends, so it is *not* an act tool and needs no approval gate (a draft
+    is private and reversible — you review and send from Gmail).
 
     Imported lazily: the google client libraries are optional, and the
     registry's try/except treats a missing import as "provider not available"
@@ -253,8 +250,30 @@ def _create_gmail_provider() -> ContextProvider | None:
     if not _google_configured():
         return None
     from agno.context.gmail import GmailContextProvider
+    from agno.tools.google.gmail import GmailTools
 
-    return GmailContextProvider(
+    class _DraftOnlyGmail(GmailContextProvider):
+        """Lock the Gmail write surface to drafts — it can never send.
+
+        Agno's Gmail write sub-agent already drafts by default; we override the
+        toolkit hook to drop every outward-send tool, making drafts-only a hard
+        guarantee rather than a prompt convention.
+
+        To let @context send for you instead: use ``GmailContextProvider``
+        directly (drop this subclass) and add ``update_gmail`` to ``ACT_TOOLS``
+        so every send pauses for your approval, like the calendar. The
+        implications + steps are in ``docs/GOOGLE.md``.
+        """
+
+        def _build_write_toolkit(self) -> GmailTools:
+            toolkit = super()._build_write_toolkit()
+            # Strip the send tools; keep create_draft_email / update_draft.
+            for name in ("send_email", "send_email_reply", "send_draft"):
+                toolkit.functions.pop(name, None)
+                toolkit.async_functions.pop(name, None)
+            return toolkit
+
+    return _DraftOnlyGmail(
         model=default_model(),
         write=True,
         token_path=gmail_token_path(),
