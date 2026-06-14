@@ -106,7 +106,7 @@ The supporting files:
 The repo has **two distinct kinds of skill**. Keep them separate.
 
 - **Runtime skills** ([`skills/`](skills/)) are playbooks the deployed @context agent runs **for its owner**, invoked in natural language ("plan my week") and owner-gated. Add your own as needed.
-- **Coding-agent workflows** ([`.agents/skills/`](.agents/skills/)) are `/slash-command` workflows your *coding agent* (Claude Code, Codex, others) runs while **developing this repo**. They are covered under [Extending](#extending).
+- **Coding-agent workflows** ([`.agents/skills/`](.agents/skills/)) are `/slash-command` workflows your *coding agent* (Claude Code, Codex, others) runs while **developing this repo**. They are covered under [Working with coding agents](AGENTS.md#working-with-coding-agents).
 
 Here are the runtime skills that are included in the repo:
 
@@ -193,26 +193,30 @@ Or enable auto-deploy in the Railway dashboard:
 4. Click **Source** and select the git repo for this project
 5. Set the deploy branch to `main` and click **Save (or Deploy)**
 
-## Talk to it from Slack
+## @context in Slack
 
-Slack is where @context becomes addressable. Set `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` and restart. The interface wires up automatically, routed to `context` with verified identity. A teammate who @-mentions it files an update, capture-only with no readback. You get the full surface. The same door works for their agents. Another agent walks through it exactly like a human does.
+Slack is where @context comes alive. It's the interface where I (@ashpreetbedi) use it the most and the interface that allows your team (and their agents) to talk to @context.
 
-[`docs/SLACK.md`](docs/SLACK.md) has the app manifest and the full setup. Mirror the same conditional for Discord, Telegram, WhatsApp, or a custom UI.
+To set it up, you need to:
+1. Create a Slack app
+2. Get the Bot User OAuth Token and Signing Secret
+3. Set the environment variables in `.env` or `.env.production`
+4. Restart the application
+
+Read [`docs/SLACK.md`](docs/SLACK.md) for the Slack setup guide.
+
+Notes:
+- Agno's AgentOS sets up the Slack interface when the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` env vars are set.
+- The `resolve_user_identity=True` flag tells the AgentOS to resolve the Slack user identity to an email, which is what `OWNER_ID` matches against.
+- See [`app/main.py`](app/main.py) for the implementation.
 
 ## Connect Gmail and Calendar
 
-This is where the alter ego gets hands. With Google credentials configured, `query_gmail` / `query_calendar` ground the rundown and meeting prep in your real inbox and calendar. `update_gmail` / `update_calendar` draft the follow-up or book the slot, pausing for your approval before anything leaves.
+With Google credentials configured, `query_gmail` / `query_calendar` ground the rundown and meeting prep in your real inbox and calendar. `update_gmail` / `update_calendar` draft the follow-up or book the slot, pausing for your approval before anything leaves.
 
 Acting as you is double-gated: the act tools exist only in your toolset, and every call requires your explicit confirmation. [`docs/GOOGLE.md`](docs/GOOGLE.md) covers both auth paths (OAuth for personal accounts, service account for Workspace deploys).
 
-## Extending
-
-- **Scheduled runs.** `scheduler=True` is on, and one schedule ships registered: `fire-due-reminders` sweeps due reminders into your inbound queue every morning (see [`agents/reminders.py`](agents/reminders.py)). Add your own, like a morning digest of meetings (next 7 days) and due-or-overdue reminders posted to Slack. Scheduled runs carry the scheduler's verified identity and run with your owner surface. See the [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler).
-- **More sources.** Wire a new `ContextProvider` in [`agents/sources.py`](agents/sources.py). The wiki can move from local files to a Git backend (durable, audited) by setting `WIKI_REPO_URL` + `WIKI_GITHUB_TOKEN`.
-- **The MCP read path.** The next bet: expose `query_*` over MCP so your other agents (Claude Code, Cursor, whatever you run) read through your @context instead of starting cold. The asymmetry already covers it. Their reads ride your verified identity.
-- **Build with coding agents.** The repo includes coding-agent workflows in [`.agents/skills/`](.agents/skills/), symlinked into `.claude/` for Claude Code, for the agent-development lifecycle: `/extend-agent`, `/improve-agent`, `/eval-and-improve`, `/review-and-improve`. These run in your coding agent and edit @context's code. They are distinct from the runtime skills under [`skills/`](skills/), which run in the deployed agent. Because the code, traces, and iteration tools all live in one place, a coding agent can read, change, and harden @context end to end.
-
-### Lock in behavior with evals
+## Evals
 
 The eval suite ([`evals/`](evals/)) is the regression net. Each case checks the response with an LLM judge and/or a tool-call assertion, covering the capture-to-file loop and the guest boundary.
 
@@ -248,7 +252,7 @@ python -m evals --case <name>  # one case
 
 ## Learn more
 
-- [`docs/SECURITY.md`](docs/SECURITY.md) — the owner/guest security model.
-- [`AGENTS.md`](AGENTS.md) — architecture and conventions (the source of truth for coding agents).
-- [Context Providers](https://ashpreetbedi.com/context-providers) — the pattern this is built on.
-- [Agno documentation](https://docs.agno.com) · [AgentOS introduction](https://docs.agno.com/agent-os/introduction) · [Agno on GitHub](https://github.com/agno-agi/agno) (drop a star if this is useful).
+- [`AGENTS.md`](AGENTS.md): architecture and conventions (source of truth for coding agents).
+- [Agno documentation](https://docs.agno.com)
+- [AgentOS introduction](https://docs.agno.com/agent-os/introduction)
+- [Agno on GitHub](https://github.com/agno-agi/agno) (drop a star if this is useful).

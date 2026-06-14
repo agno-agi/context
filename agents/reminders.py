@@ -1,22 +1,14 @@
 """
-The Reminder Sweep
-==================
+Flag Reminders
+==============
 
-Fire due reminders into the owner's inbound queue.
+Push reminders into the owner's inbound queue.
 
-A reminder filed in `context.reminders` carries a `due_at`, but nothing watches
-that clock — the agent files reminders, it never surfaces them. `fire_due_reminders`
-is the watcher: a deterministic sweep that finds reminders which have come due
-and haven't been surfaced yet, drops each into the owner's inbound queue (so it
-shows up on the next `rundown` / daily rundown), and stamps `notified_at` so a
-reminder fires exactly once no matter how often the sweep runs.
+When @context creates a reminder, it saves it into the `context.reminders` table.
 
-It rides the same owner rails as the inbound queue: it's added only in the owner
-branch of `context_tools`, and it's only ever reached on the owner surface — the
-daily scheduler run (verified identity `__scheduler__`, which `is_owner` honors)
-triggers `/agents/context/runs`, and the agent calls this tool. The `is_owner`
-guard is redundant behind the toolset gate but cheap defense in depth, matching
-`rundown` / `acknowledge`.
+But there needs to be a way to surface reminders that have come due. We can:
+1. Surface them as slack messages.
+2. Or push them into the owner's inbound queue which is surfaced on the daily rundown.
 """
 
 from agno.exceptions import StopAgentRun
