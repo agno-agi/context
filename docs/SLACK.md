@@ -155,7 +155,7 @@ Not required, but recommended: give your @context an icon.
 
 In your Slack app config, go to **Basic Information** → **Display Information** → **App icon & Preview** and click **Add App Icon**. Slack wants a square image at least 512×512 px. A PNG works well.
 
-You can use the prompt below to generate an icon for your own @context app.
+You can use this prompt as a starting point to generate an icon for your own @context app using ChatGPT.
 
 ```text
 A painterly, semi-realistic matte painting of an imagined city skyline at sunrise — warm, magical, and cinematic, in the style of a high-end animated-film background (Studio Ghibli / Disney concept art). Full-bleed square that fills the frame edge to edge — no border, no frame.
@@ -173,7 +173,9 @@ Square 1:1, balanced composition, rich depth, reads beautifully when Slack masks
 Avoid: any real or recognizable city or landmark; text, letters, logos, watermarks; people in the foreground; harsh HDR; night; clutter.
 ```
 
-After generating the icon, upload it to Slack (a square PNG, 512×512 or larger). Slack masks icons to a rounded square, so a full-bleed image — no border of its own — works best. Tweak the prompt to taste: swap sunrise for blue-hour dusk, the blossoms for autumn maples, or the river for a harbor.
+After generating the icon, upload it to Slack (a square PNG, 512×512 or larger). Slack masks icons to a rounded square, so a full-bleed image — no border of its own — works best.
+
+Continue tweaking the prompt to taste: swap sunrise for blue-hour dusk, the blossoms for autumn maples, or the river for a harbor.
 
 ## How it works
 
