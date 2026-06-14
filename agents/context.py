@@ -49,12 +49,24 @@ _skills = _load_skills()
 def caller_information(run_context: RunContext | None = None) -> str:
     """Build the caller's instructions based on their identity.
 
-    Wired as a callable on `Agent.dependencies` so Agno resolves it on every run.
+    Rendered per run by `context_instructions` (the owner gets the full guide,
+    a guest the capture-only one).
     """
     if is_owner(run_context):
         skills = _skills.get_system_prompt_snippet() if _skills is not None else ""
         return OWNER_GUIDE.format(providers=context_providers_summary(), skills=skills)
     return GUEST_GUIDE.format(owner=owner_display_name("(no owner configured)"))
+
+
+def context_instructions(run_context: RunContext | None = None) -> str:
+    """Render Context's system prompt for this run."""
+
+    user_id = getattr(run_context, "user_id", None) or ANON_USER_ID
+    return CONTEXT_INSTRUCTIONS.format(
+        owner_name=owner_display_name(),
+        user_id=user_id,
+        caller_information=caller_information(run_context),
+    )
 
 
 def context_tools(run_context: RunContext | None = None) -> list:
@@ -94,7 +106,7 @@ context = Agent(
     name="Context",
     model=default_model(),
     db=get_postgres_db(),
-    instructions=CONTEXT_INSTRUCTIONS,
+    instructions=context_instructions,
     tools=context_tools,
     # Default user_id when a caller (eval runner, unauthenticated script) invokes Context without providing a user_id.
     # Production surfaces (UI, Slack) override this with a verified identity.
@@ -105,9 +117,6 @@ context = Agent(
     pre_hooks=[normalize_identity],
     # Tool-hook refuses any non-capture tool from a guest caller.
     tool_hooks=[enforce_capture_only],
-    # `{caller_information}` resolves per run.
-    # `{owner_name}` is the owner's display name, also resolved per run.
-    dependencies={"caller_information": caller_information, "owner_name": owner_display_name()},
     # @context can learn about the caller. Agentic mode adds `update_user_memory` + `update_profile` tools to the agent.
     # A guest's memories and profile never touch the owner's context.
     learning=LearningMachine(

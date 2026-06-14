@@ -91,8 +91,8 @@ questions about the owner" is structural, not a prompt instruction.
 The same gate covers **runtime skills** (owner-only playbooks in
 [`skills/`](../skills/)). The `get_skill_*` access tools are added only in the
 owner branch of `context_tools`, and the skills "browse" snippet only renders
-in the owner branch of the `caller_information` `dependencies` resolver — so a
-guest's toolset *and* prompt carry zero skill references. Skills are a
+in the owner branch of `caller_information` — so a guest's toolset *and* prompt
+carry zero skill references. Skills are a
 capability layered over the existing tools, not a new trust boundary.
 
 **The prompt mirrors the toolset.** `caller_information` resolves the
