@@ -228,6 +228,21 @@ def _google_configured() -> bool:
     return bool(getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"))
 
 
+def gmail_token_path() -> str:
+    """Where the Gmail OAuth token cache lives (``GMAIL_TOKEN_FILE`` or repo root).
+
+    The single source of truth for this path: the provider reads it, the mint
+    script (``scripts/google_mint_tokens.py``) writes it, and the entrypoint's
+    base64 materialization restores it on deploys that don't keep files.
+    """
+    return getenv("GMAIL_TOKEN_FILE") or str(REPO_ROOT / "gmail_token.json")
+
+
+def calendar_token_path() -> str:
+    """Where the Calendar OAuth token cache lives (``CALENDAR_TOKEN_FILE`` or repo root)."""
+    return getenv("CALENDAR_TOKEN_FILE") or str(REPO_ROOT / "calendar_token.json")
+
+
 def _create_gmail_provider() -> ContextProvider | None:
     """Gmail — read + write. ``update_gmail`` is an act tool (approval-gated).
 
@@ -242,7 +257,7 @@ def _create_gmail_provider() -> ContextProvider | None:
     return GmailContextProvider(
         model=default_model(),
         write=True,
-        token_path=str(REPO_ROOT / "gmail_token.json"),
+        token_path=gmail_token_path(),
     )
 
 
@@ -255,7 +270,7 @@ def _create_calendar_provider() -> ContextProvider | None:
     return GoogleCalendarContextProvider(
         model=default_model(),
         write=True,
-        token_path=str(REPO_ROOT / "calendar_token.json"),
+        token_path=calendar_token_path(),
     )
 
 

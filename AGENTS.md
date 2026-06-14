@@ -183,7 +183,9 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | no | — | Service-account JSON key path — activates the `gmail` + `calendar` providers (headless; Gmail needs `GOOGLE_DELEGATED_USER`). See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
 | `GOOGLE_DELEGATED_USER` | no | — | The mailbox/calendar the service account acts as (domain-wide delegation). |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | no | — | The key as base64 for platforms without secret-file mounts — the entrypoint materializes it and sets `GOOGLE_SERVICE_ACCOUNT_FILE`. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | — | OAuth client for the `gmail` + `calendar` providers (personal accounts; consent tokens minted locally — [`docs/GOOGLE.md`](docs/GOOGLE.md)). |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | — | OAuth client for the `gmail` + `calendar` providers (personal accounts; mint the consent tokens with `python scripts/google_mint_tokens.py` — [`docs/GOOGLE.md`](docs/GOOGLE.md)). |
+| `GMAIL_TOKEN_FILE` / `CALENDAR_TOKEN_FILE` | no | `<repo>/gmail_token.json`, `<repo>/calendar_token.json` | Where the OAuth token caches live (read by the providers, written by the mint script). |
+| `GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64` | no | — | The minted OAuth tokens as base64, for platforms without secret-file mounts — the entrypoint restores them to the token-file paths at startup (so OAuth survives a redeploy). |
 | `KNOWLEDGE_REPO_URL` | no | — | Set with `KNOWLEDGE_GITHUB_TOKEN` to back the `knowledge` base with a Git repo (durable, audit trail) instead of the local filesystem. Point it at your specs repo — see "The knowledge base". |
 | `KNOWLEDGE_GITHUB_TOKEN` | no | — | GitHub token for the knowledge base's `GitBackend`. Required alongside `KNOWLEDGE_REPO_URL`. |
 | `KNOWLEDGE_BRANCH` | no | `main` | Branch for the knowledge base's `GitBackend`. |
@@ -220,7 +222,12 @@ The bot token alone (no signing secret) still activates the `slack` provider, wh
 
 ## Gmail + Google Calendar
 
-Configure Google credentials (either auth path) and the `gmail` + `calendar` providers are added to the registry — `query_gmail` / `query_calendar` for reads, `update_gmail` / `update_calendar` as approval-gated act tools. Setup, token minting, and the approval flow live in [`docs/GOOGLE.md`](docs/GOOGLE.md); the act-tool design is in [`docs/SECURITY.md`](docs/SECURITY.md) (L6).
+Configure Google credentials (either auth path) and the `gmail` + `calendar` providers are added to the registry — `query_gmail` / `query_calendar` for reads, `update_gmail` / `update_calendar` as approval-gated act tools. Two scripts cover setup:
+
+- **Service account (Workspace, headless — deploys):** `./scripts/google_setup.sh` provisions the GCP project, enables the Gmail + Calendar APIs, creates the service account + key (auto-overriding the key-creation org policy if needed), and prints the Client ID + scopes for the one manual step — the domain-wide delegation grant in the Workspace admin console.
+- **OAuth (personal accounts — local):** `python scripts/google_mint_tokens.py` loads `.env`, runs the browser consent flow, and writes the Gmail + Calendar token caches.
+
+Token caches live at `gmail_token.json` / `calendar_token.json` (override with `GMAIL_TOKEN_FILE` / `CALENDAR_TOKEN_FILE`; resolved in one place by `gmail_token_path()` / `calendar_token_path()` in [`agents/sources.py`](agents/sources.py)). On Railway, ship the SA key or the tokens as base64 (`GOOGLE_SERVICE_ACCOUNT_JSON_B64` / `GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64`) and the [entrypoint](scripts/entrypoint.sh) restores them at startup. Full setup, the approval flow, and troubleshooting live in [`docs/GOOGLE.md`](docs/GOOGLE.md); the act-tool design is in [`docs/SECURITY.md`](docs/SECURITY.md) (L6).
 
 ## Deploying to Railway
 

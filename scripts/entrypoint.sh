@@ -48,6 +48,22 @@ if [[ -n "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" && -z "$GOOGLE_SERVICE_ACCOUNT_FILE"
     echo ""
 fi
 
+# OAuth token caches via env — same idea for the OAuth path. The token files
+# don't survive a redeploy on a baked image (Railway), so ship them as base64
+# and the entrypoint restores them at startup. Paths mirror the defaults in
+# agents/sources.py (GMAIL_TOKEN_FILE / CALENDAR_TOKEN_FILE override them). A
+# token already on disk (e.g. mounted in dev via .:/app) wins and isn't touched.
+materialize_token() {
+    local b64="$1" path="$2" label="$3"
+    if [[ -n "$b64" && ! -f "$path" ]]; then
+        echo "$b64" | base64 -d > "$path"
+        echo -e "    ${DIM}${label} token restored from base64 → ${path}.${NC}"
+        echo ""
+    fi
+}
+materialize_token "$GMAIL_TOKEN_JSON_B64" "${GMAIL_TOKEN_FILE:-/app/gmail_token.json}" "Gmail"
+materialize_token "$CALENDAR_TOKEN_JSON_B64" "${CALENDAR_TOKEN_FILE:-/app/calendar_token.json}" "Calendar"
+
 case "$1" in
     chill)
         echo -e "    ${DIM}Mode: chill${NC}"
