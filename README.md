@@ -1,13 +1,13 @@
 # @context - a professional alter ego
 
-@context is a self-hosted alter ego: it captures your work context and organizes it using a private database and knowledge base. @context is designed with privacy and security as a first principle, you own everything - your keys, your cloud, your data.
+@context is a self-hosted alter ego: it captures your work context and organizes it using a private crm and knowledge base. @context is designed with privacy and security as a guiding principle. You own everything - your keys, your cloud, your data.
 
 @context runs in two modes:
 
-1. **Owner mode:** all tools available: capture context (*"met Kyle from Agno, follow up next week"*), retrieve context (*"prep me for the 2pm"*), prepare context (*"process today"*)
-2. **Guest mode:** teammates (*and their agents*) can leave updates in your queue. Guests can only add context, never retrieve it.
+1. **Owner mode:** all tools available: capture context (*"met Kyle from Agno, follow up next week"*), retrieve context (*"give me a rundown of my day"*), prepare context (*"process today"*)
+2. **Guest mode:** teammates (*and their agents*) can leave updates in your queue. You get briefed when you ask for a rundown.
 
-@context runs on Agno's AgentOS runtime, so user identity is verified on every request. The boundary between the two modes is enforced via code by only adding tools based on the user's role (owner vs guest).
+@context runs on Agno's AgentOS runtime, so user identity is verified on every request and tools are assigned based on the user's role (owner vs guest). (JWT-based auth + RBAC).
 
 > Built on [Agno](https://docs.agno.com).
 
@@ -15,23 +15,28 @@
 
 @context has five jobs.
 
-1. **Maintain a database.** Share *"met Kyle from Agno, wants a partnership, follow up next week"* and it stores a contact, a note, and a dated reminder without you picking a form or a field.
-2. **Maintain a knowledge base.** @context can manage product specs, customer interviews, project briefs and research using a neatly maintained knowledge base.
-3. **Recall and synthesize.** Ask *"what's my week plan?"* and @context reads Slack, its database (projects, contacts, notes, reminders), and its knowledge base (specs, briefs, design docs) to draft your week. It can also run on a schedule. Before *"your 2pm with Kyle"* it assembles a short brief from the contact details, the last note, the open reminder, and the relevant Slack threads.
-4. **Represent you.** Your teammates (and their agents) can talk to your @context. A teammate types *"@your-context fixed the auth bug"* and it's saved to your queue. Whenever you ask for a **rundown** you get the latest picture. This improves your signal:noise ratio.
-5. **Act, with your approval.** Connect [Gmail and Calendar](docs/GOOGLE.md) and it can send follow-ups and put meetings on your calendar. Every act tool waits for your sign-off before it executes.
+1. **Maintain a crm.** Share *"met Kyle from Agno, wants a partnership, follow up next week"* and it stores a contact, a note, and a dated reminder without you picking forms or fields.
+2. **Maintain a knowledge base.** @context can write product specs, parse notes from customer interviews, manage project briefs and conduct deep research, and maintain it all in a neatly organized knowledge base.
+3. **Run your day, plan your week, prep for what's next.** @context can run playbooks to run your day, plan your week, and prep for meetings. @context comes with a few playbooks but you should definitely customize and add your own. Here are the included ones:
+   - **Rundown** *("what's on today?")* — a prioritized brief of things on your plate, one digest instead of five apps: the updates teammates (and their agents) left in your queue, reminders that are due, today's meetings, the emails you missed, and the Slack threads worth a look.
+   - **Week plan** *("what's my week?")* — priorities for the week. Run this on a schedule sunday night to start your week with 🔥
+   - **Prep** *("prep for my 2pm with Kyle")* — a tight pre-meeting brief: who they are, notes, past threads, what's still open, email and Slack exchanges, and — for not known contacts — public background pulled from the web.
 
-@context also runs **playbooks** defined under `skills/`. Reusable workflows like *"plan my week"*, *"process today"*, and *"prep for the weekly meeting"* can be executed on a schedule in a somewhat deterministic manner.
+   @context can run these playbooks on demand or on a schedule, and send the results to Slack.
+4. **Represent you.** Your teammates (and their agents) can share non-urgent updates with your @context. A teammate types *"@your-context my claude fixed the auth bug"* and it's saved to your queue — surfacing in your next rundown. This keeps your signal-to-noise high.
+5. **Act, with your approval.** Connect [Gmail and Calendar](docs/GOOGLE.md) and it can send follow-ups and put meetings on your calendar. Tools that take external actions explicitly wait for your approval on the AgentOS UI before they execute.
 
 ## Security
 
-@context is an alter ego with access to a lot of sensitive information. The security boundaries need to be airtight.
+@context is an alter ego with access to a lot of sensitive information and the security boundaries need to be AIRTIGHT.
 
-The design permits anyone to write to it but only you can read or act through it. To everyone else it is a polite notetaker that only captures. Although it does remember who it is talking to: each caller gets their own user-memory, kept entirely separate from yours.
+Agno's AgentOS makes it possible to:
+1. Verify the user making the request. AgentOS extracts the `user_id` from the JWT or Slack request. This allows us to determine if the request is from the owner or a guest.
+2. Based on the user's role (owner or guest), we can choose the right tools to add to the agent.
 
-The boundary between owner and guest is enforced in code. The tools available to each role are chosen from the caller's verified identity before the model runs. A guest's session never gets a read tool, so data leaks are prevented by design.
+This security model enables us to design a system that permits anyone to write to it but only you can read or act through it. To everyone else it is a polite notetaker that only captures. Although it does remember who it is talking to: each caller gets their own user-memory, kept entirely separate from yours.
 
-Acting on your behalf is also a double-gated operation. Sending an email or changing your calendar requires two things: 1) the act tool only exists when the agent is responding to the owner, and 2) every tool call pauses for explicit approval before it executes. This is enforced by the `requires_confirmation` and `approval_type="required"` settings on the external action tools (`update_gmail`, `update_calendar`).
+To push our security boundary even further, tools that take external actions like sending an email or changing your calendar pause for explicit approval before they run. AgentOS makes this possible with the `requires_confirmation` and `approval_type="required"` settings on sensitive tools like `update_gmail` and `update_calendar`.
 
 Finally, everything runs locally or in your own cloud, inside your VPC, with every byte of data (context's database, context's knowledge base, context's inbox) being stored in your own database.
 
