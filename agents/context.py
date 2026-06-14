@@ -14,7 +14,7 @@ from agno.utils.log import log_warning
 from agents.inbox import GUEST_TOOLS, acknowledge, rundown
 from agents.instructions import CONTEXT_INSTRUCTIONS, GUEST_GUIDE, OWNER_GUIDE
 from agents.policy import enforce_capture_only, normalize_identity
-from agents.reminders import fire_due_reminders
+from agents.reminders import queue_reminders
 from agents.sources import ACT_TOOLS, context_providers_summary, get_context_providers, list_contexts
 from app.identity import ANON_USER_ID, is_owner, owner_display_name
 from app.settings import default_model
@@ -69,7 +69,7 @@ def context_tools(run_context: RunContext | None = None) -> list:
         tools: list = []
         for ctx in get_context_providers():
             tools.extend(ctx.get_tools())
-        tools += [list_contexts, rundown, acknowledge, fire_due_reminders]
+        tools += [list_contexts, rundown, acknowledge, queue_reminders]
         if _skills is not None:
             tools += _skills.get_tools()
         # The approval gate on acting as the owner: tools that reach the

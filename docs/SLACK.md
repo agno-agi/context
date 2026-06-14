@@ -1,36 +1,34 @@
 # Connecting @context to Slack
 
-Slack is where @context becomes *addressable*. Teammates — and their agents —
-@-mention it to leave you updates; you DM it for the full surface: capture,
-retrieval, the rundown. Same bot, two very different callers, and Slack's
-verified identity is what decides which one it's talking to (see
-[`docs/SECURITY.md`](SECURITY.md)).
+Slack is where @context comes alive. It's the recommended interface for you, your team, and their agents to talk to @context.
+
+- Teammates — and their agents — can @-mention it to leave you updates;
+- You can DM it for private conversations.
+- It can DM you for notifications and reminders.
 
 ## Prerequisites
 
-- @context running locally or deployed (see the [README](../README.md))
-- A Slack workspace where you can install apps
-- [ngrok](https://ngrok.com) for local development only
+- @context running locally or in production (see [README#run-in-production](../README.md#run-in-production))
+- A Slack workspace where you can install @context
+- [ngrok](https://ngrok.com/download) installed and running if you are running @context locally [not needed for production]
 
-## Step 1: Get your URL
+## Step 1: Get the URL to reach @context
 
-Slack needs a public URL that reaches your AgentOS.
+For Slack to reach @context, it needs a public URL to send events to.
 
-**Local development** — expose the API with ngrok and copy the `https://` URL:
+**Production**: use your AgentOS domain (e.g. the Railway domain).
+
+**Local development**: expose the AgentOS API to the public internet using `ngrok`. [Install `ngrok`](https://ngrok.com/download) and run the following command to get a public URL. Copy the `https://` URL.
 
 ```bash
 ngrok http 8000
 ```
 
-**Production** — use your deployed domain (e.g. the Railway domain `up.sh`
-printed).
-
 ## Step 2: Create the Slack app
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps)
 2. **Create New App** → **From an app manifest** → pick your workspace
-3. Choose **JSON** and paste the manifest below — replace `https://your-url`
-   with the URL from Step 1
+3. Choose **JSON** and paste the manifest below — replace `https://your-url` with the URL from Step 1
 4. **Create**
 
 ```json
@@ -49,6 +47,10 @@ printed).
         "bot_user": {
             "display_name": "Context",
             "always_online": true
+        },
+        "assistant_view": {
+            "assistant_description": "Capture, file, and retrieve your working context.",
+            "suggested_prompts": []
         }
     },
     "oauth_config": {
@@ -82,10 +84,13 @@ printed).
             "request_url": "https://your-url/slack/events",
             "bot_events": [
                 "app_mention",
-                "message.channels",
-                "message.groups",
+                "assistant_thread_started",
                 "message.im"
             ]
+        },
+        "interactivity": {
+            "is_enabled": true,
+            "request_url": "https://your-url/slack/interactions"
         },
         "org_deploy_enabled": false,
         "socket_mode_enabled": false,
@@ -95,8 +100,32 @@ printed).
 }
 ```
 
-`users:read.email` matters: it's how the interface resolves the verified Slack
-identity to an email, which is what `OWNER_ID` matches against.
+Three parts of this manifest are load-bearing — keep them even if you trim
+scopes:
+
+- **`features.assistant_view`** turns on Slack's "Agents & AI Apps" experience.
+  `app/main.py` runs the interface with `streaming=True`, which streams the
+  reply token-by-token with task cards through that assistant UI. Without this
+  block the bot still works, but callers stare at a spinner until the whole
+  answer lands.
+- **`settings.interactivity`** points Slack at `/slack/interactions`. That's the
+  return path for @context's **act-tool approvals** — when you ask it to send
+  mail or write to the calendar, the run pauses and posts Approve / Reject
+  buttons, and the click comes back here. Drop this block and the buttons render
+  but do nothing (see [`docs/SECURITY.md`](SECURITY.md) → act tools).
+- **`bot_events`** are the three @context acts on: `app_mention` (a teammate
+  @-mentions it in a channel), `message.im` (you DM it), and
+  `assistant_thread_started` (opening the assistant thread, so the suggested
+  prompts appear). It deliberately omits `message.channels` / `message.groups`:
+  with the default `reply_to_mentions_only=True`, @context only answers
+  @-mentions in channels, so those events would just be received and dropped.
+
+`users:read.email` is the linchpin of the security model: it's how the
+interface resolves the verified Slack identity to an email, which is what
+`OWNER_ID` matches against. The `channels:history` / `groups:history` /
+`search:read.*` scopes aren't for the interface — they power the `slack`
+**context provider** (`query_slack`), so you can ask @context to read and
+search channel history.
 
 ## Step 3: Install to the workspace
 
@@ -159,15 +188,49 @@ Slack(
     token=SLACK_BOT_TOKEN,
     signing_secret=SLACK_SIGNING_SECRET,
     resolve_user_identity=True,
+    suggested_prompts=[...],  # starter chips in the assistant pane
 )
 ```
 
-Slack requests are HMAC-verified against the signing secret, and the message
-author comes from the event envelope — not the message text — so identity
-can't be forged by what someone types. `resolve_user_identity=True` maps the
-author to their email, and `is_owner` compares that against `OWNER_ID`. Each
-thread is its own session, so follow-ups carry context without re-mentioning.
+A few things this wiring leans on:
+
+- **Identity can't be forged by message text.** Slack requests are
+  HMAC-verified against the signing secret (with a 5-minute timestamp window to
+  block replays), and the author comes from the event envelope — not the body.
+  `resolve_user_identity=True` maps that author to their email via
+  `users:read.email`, and `is_owner` compares it to `OWNER_ID`.
+- **Email resolution fails closed.** If the email can't be resolved — scope
+  missing, or the profile has none — the interface falls back to the raw Slack
+  user ID, which won't match `OWNER_ID`. So a misconfigured owner silently drops
+  to the *guest* surface; it never accidentally promotes a guest.
+- **When it replies.** With the default `reply_to_mentions_only=True`, @context
+  answers every message in a DM but only @-mentions in a channel — so in a
+  channel a teammate @-mentions it each turn, while a DM thread flows without
+  re-mentioning.
+- **One session per thread.** The session id is `context:<thread_ts>`, so each
+  thread carries its own history; a new top-level message starts a fresh one.
 
 The same door works for other interfaces — mirror the conditional in
 `app/main.py` with Agno's [Discord / Telegram / WhatsApp
 interfaces](https://docs.agno.com/agent-os/interfaces/overview).
+
+## Troubleshooting
+
+- **It treats you as a guest (capture-only).** Your Slack profile email doesn't
+  match `OWNER_ID`, or `users:read.email` isn't granted. Confirm the email on
+  your Slack profile is in `OWNER_ID`, reinstall the app if you just added the
+  scope, and restart.
+- **No streaming — a spinner, then the whole answer at once.** The "Agents & AI
+  Apps" experience isn't on. The manifest's `features.assistant_view` block
+  enables it; on an existing app, toggle it under **App Home → Agents & AI
+  Apps**.
+- **Approve / Reject buttons do nothing.** Interactivity isn't wired. Set
+  **Interactivity & Shortcuts → Request URL** to
+  `https://your-url/slack/interactions` (the manifest's `settings.interactivity`
+  block does this).
+- **403 on events.** Wrong `SLACK_SIGNING_SECRET`, or the request timestamp is
+  stale (Slack rejects anything older than 5 minutes). On ngrok, restart it to
+  clear a stale tunnel.
+- **The bot never responds.** Check the **Request URL** resolves to
+  `https://your-url/slack/events`, and that `app_mention` + `message.im` are
+  subscribed.

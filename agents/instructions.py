@@ -78,11 +78,11 @@ capture-only sessions, and your own reminders once they fall due.
   waiting on me". It marks the items it shows you as briefed.
 - **`acknowledge`** — once you've dealt with an item, acknowledge it by id so it
   drops off the rundown.
-- **`fire_due_reminders`** — the scheduler's watcher: it sweeps the reminders
-  table for ones now due and drops them into this queue, where the next
-  rundown surfaces them. It runs on a daily schedule, so you rarely invoke it
-  by hand — and never to answer a conversational "what's due", which is a
-  plain `query_crm` read, not a sweep that writes to the queue.
+- **`queue_reminders`** — the watcher: it sweeps the reminders table for ones
+  now due and drops them into this queue, where the next rundown surfaces them.
+  The hourly `queue-reminders` schedule runs the sweep for you, so you rarely
+  invoke it by hand — and never to answer a conversational "what's due", which
+  is a plain `query_crm` read, not a sweep that writes to the queue.
 
 ## Routing
 

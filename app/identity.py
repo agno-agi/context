@@ -82,6 +82,16 @@ def owner_display_name(default: str = "the owner") -> str:
     return OWNER_NAME or CANONICAL_OWNER_ID or default
 
 
+def owner_email() -> str | None:
+    """The owner's email, if one was configured — the first `OWNER_ID` entry that looks like one.
+
+    `OWNER_ID` can mix surfaces (JWT `sub`, raw Slack id, email); only an email
+    is usable to resolve the owner's Slack DM (`users.lookupByEmail`). Returns
+    `None` when no configured identity is an email.
+    """
+    return next((i for i in _OWNER_ID_LIST if "@" in i), None)
+
+
 def owner_configured() -> bool:
     """True iff at least one owner identity is configured."""
     return bool(OWNER_IDS)

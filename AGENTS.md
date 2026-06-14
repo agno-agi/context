@@ -28,7 +28,7 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │
 ├── Inbound queue (agents/inbox.py)             submit_update / rundown / acknowledge
 │
-├── Reminder sweep (agents/reminders.py)        fire_due_reminders → inbound queue  (daily schedule, owner-only)
+├── Reminder sweep (agents/reminders.py)        queue_reminders → inbound queue  (hourly workflow schedule, owner-only)
 │
 ├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today
 │
@@ -55,7 +55,7 @@ Shared:
 | [`agents/sources.py`](agents/sources.py) | Provider registry — builds/caches providers, async setup/close, `list_contexts`. |
 | [`agents/instructions.py`](agents/instructions.py) | `CONTEXT_INSTRUCTIONS` + the `crm` and `knowledge` read/write sub-agent prompts (`crm` rendered table-aware from the schema spec; `knowledge` specs-aware). |
 | [`agents/inbox.py`](agents/inbox.py) | The inbound queue — `submit_update` (everyone), `rundown` / `acknowledge` (owner-only). |
-| [`agents/reminders.py`](agents/reminders.py) | The reminder sweep — `fire_due_reminders` finds due reminders and files them into the inbound queue; runs on the daily schedule, owner-only. |
+| [`agents/reminders.py`](agents/reminders.py) | The reminder sweep — `_queue_reminders` claims due reminders and files them into the inbound queue. Exposed two ways: the `queue_reminders` owner tool (manual) and the `queue-reminders` workflow step (run hourly by the schedule, deterministically). Owner-only on both. |
 | [`agents/policy.py`](agents/policy.py) | Defense-in-depth hooks — `normalize_identity` (pre) + `enforce_capture_only` (tool). |
 | [`skills/`](skills/) | Runtime skills — owner-only playbooks, one `SKILL.md` per folder (`week-plan`, `daily-rundown`, `prep-for`, `process-today`). Loaded + owner-gated by `context.py`; the agent uses them via progressive disclosure. |
 | [`.agents/skills/`](.agents/skills/) | Dev-time **coding-agent workflows** (`extend-agent`, `improve-agent`, `eval-and-improve`, `review-and-improve`) — slash commands coding agents run *on this repo*, distinct from the runtime skills above. `.claude/skills` is a committed symlink here — see "Working with coding agents". |
@@ -194,7 +194,7 @@ The suite lives in [`evals/`](evals/). Each case sends one input to the `context
 
 `scheduler=True` is on in [`app/main.py`](app/main.py), and `register_schedules()` registers one schedule on every boot (idempotent):
 
-- **`fire-due-reminders`** — daily at 08:00 UTC, the owner-surface run calls `fire_due_reminders` ([`agents/reminders.py`](agents/reminders.py)), which sweeps `context.reminders` for anything now due and drops it into the inbound queue, where the next rundown surfaces it. `notified_at` is stamped so each reminder fires exactly once.
+- **`queue-reminders`** — hourly (on the hour, UTC), the schedule hits the `queue-reminders` workflow (`/workflows/queue-reminders/runs`), whose one step runs `_queue_reminders` ([`agents/reminders.py`](agents/reminders.py)) on the owner surface. It sweeps `context.reminders` for anything now due and drops it into the inbound queue, where the next rundown surfaces it. `notified_at` is stamped (via an atomic claim) so each reminder fires exactly once. It's a workflow, not an agent run, so the sweep fires deterministically — nothing depends on a model choosing to call a tool.
 
 Hand the scheduler any other agent / workflow + a cron expression to add more. Natural fits for `@context`:
 

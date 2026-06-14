@@ -192,7 +192,7 @@ The supporting files:
 - [`agents/instructions.py`](agents/instructions.py) defines the role-specific instructions.
 - [`agents/sources.py`](agents/sources.py) defines the context providers (crm, knowledge, workspace, web, Slack, Gmail, Calendar) and how each registers its `query_` / `update_` tools.
 - [`agents/inbox.py`](agents/inbox.py) defines the inbound queue: `submit_update` (anyone), then `rundown` / `acknowledge` (you only).
-- [`agents/reminders.py`](agents/reminders.py) defines the reminder sweep: `fire_due_reminders` files due reminders into the inbound queue on a daily schedule.
+- [`agents/reminders.py`](agents/reminders.py) defines the reminder sweep: `queue_reminders` files due reminders into the inbound queue, run hourly by the `queue-reminders` workflow schedule.
 - [`agents/policy.py`](agents/policy.py) defines the pre-hook and tool-hook that back the owner/guest boundary.
 
 ### The skills (`skills/`)

@@ -11,8 +11,11 @@ from agno.os import AgentOS
 from agno.os.config import AuthorizationConfig
 from agno.scheduler import ScheduleManager
 from agno.utils.log import log_info, log_warning
+from agno.workflow.step import Step
+from agno.workflow.workflow import Workflow
 
 from agents.context import context
+from agents.reminders import queue_reminders_step
 from agents.sources import close_context_providers, setup_context_providers
 from app.identity import owner_configured
 from app.settings import is_prd, runtime_env
@@ -20,6 +23,20 @@ from db import create_tables, get_postgres_db
 
 # One database handle, shared by AgentOS persistence and the scheduler.
 db = get_postgres_db()
+
+# The reminder sweep as a one-step workflow. The hourly `queue-reminders`
+# schedule triggers it at /workflows/queue-reminders/runs, so the sweep fires
+# deterministically — no model deciding whether to call a tool. The step
+# re-checks is_owner (see agents/reminders.py).
+queue_reminders_workflow = Workflow(
+    id="queue-reminders",
+    name="Queue Reminders",
+    description="Push due reminders into the owner's inbound queue.",
+    db=db,
+    # Agno injects run_context into the step by name at runtime, but Step.executor's
+    # type only declares the single-arg (StepInput) form — hence the narrow ignore.
+    steps=[Step(name="queue-reminders", executor=queue_reminders_step)],  # type: ignore[arg-type]
+)
 
 
 def register_schedules() -> None:
@@ -31,25 +48,22 @@ def register_schedules() -> None:
     honors — i.e. on the owner surface. A failure here must not take startup
     down, so it degrades to a warning.
 
-    - fire-due-reminders: every morning, the owner-surface run calls
-      `fire_due_reminders`, which sweeps `context.reminders` for anything now
-      due and drops it into the inbound queue (see `agents/reminders.py`).
+    - queue-reminders: hourly, the schedule hits the `queue-reminders` workflow
+      (`/workflows/queue-reminders/runs`), whose one step calls `_queue_reminders`
+      and sweeps `context.reminders` for anything now due into the inbound queue
+      (see `agents/reminders.py`). It's a workflow, not an agent run, so the
+      sweep fires deterministically — no model deciding whether to call a tool.
     """
     try:
         ScheduleManager(db).create(
-            name="fire-due-reminders",
-            cron="0 8 * * *",  # 08:00 UTC daily
-            endpoint="/agents/context/runs",
-            payload={
-                "message": (
-                    "Scheduled reminder sweep: call `fire_due_reminders` to surface any "
-                    "reminders that have come due, then reply with the one-line summary it returns."
-                )
-            },
-            description="Daily sweep: surface due reminders into the owner's inbound queue.",
+            name="queue-reminders",
+            cron="0 * * * *",  # hourly, on the hour (UTC)
+            endpoint="/workflows/queue-reminders/runs",
+            payload={"message": "Hourly sweep: queue reminders that have come due."},
+            description="Hourly: push due reminders into the owner's inbound queue.",
             if_exists="update",
         )
-        log_info("@context: registered schedule 'fire-due-reminders'")
+        log_info("@context: registered schedule 'queue-reminders'")
     except Exception as exc:
         log_warning(f"@context: could not register schedules: {exc}")
 
@@ -84,6 +98,18 @@ if SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET:
             token=SLACK_BOT_TOKEN,
             signing_secret=SLACK_SIGNING_SECRET,
             resolve_user_identity=True,
+            # Starter chips in the assistant pane (the owner's primary surface).
+            # Rendered on `assistant_thread_started`, so the manifest must
+            # subscribe that event and enable `assistant_view`. Mirrors the
+            # quick prompts in app/config.yaml.
+            suggested_prompts=[
+                {"title": "Daily rundown", "message": "Give me a rundown of what's waiting on me"},
+                {"title": "My week", "message": "What does my week look like?"},
+                {
+                    "title": "Leave an update",
+                    "message": "Met Kyle from Agno, wants a partnership — follow up next week",
+                },
+            ],
         )
     )
 
@@ -116,6 +142,7 @@ agent_os = AgentOS(
     lifespan=lifespan,
     db=db,
     agents=[context],
+    workflows=[queue_reminders_workflow],
     interfaces=interfaces,
     config=str(Path(__file__).parent / "config.yaml"),  # Quick prompts for the agents.
     # Enable JWT based authorization in production.
