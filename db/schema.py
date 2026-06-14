@@ -160,5 +160,5 @@ def agent_instructions() -> str:
         for c in table.columns:
             label = c.name if c.type == "TEXT" else f"{c.name} {c.type}"
             labels.append(f"`{label}` ({c.hint})" if c.hint else f"`{label}`")
-        lines.append(f"- `{SCHEMA}.{table.name}` — {table.description}: {', '.join(labels)}")
+        lines.append(f"- `{SCHEMA}.{table.name}` ({table.description}): {', '.join(labels)}")
     return "\n".join(lines)
