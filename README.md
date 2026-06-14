@@ -113,17 +113,17 @@ This lets @context handle requests like:
 
 ## @context Database (CRM)
 
-The CRM is @context's **structured memory** — `query_crm` to read, `update_crm` to write. It's a Postgres store (the `context` schema) with day-one tables for the things that have shape: **projects, meetings, reminders, notes, contacts**. The agent maps what you tell it onto the right table, and can create new tables on demand. Always on, read and write.
+@context comes with a Postgres-backed **database** that gives it long-term **structured memory**. @context uses `query_crm` to read, `update_crm` to write to this database.
 
-Writes are confined to the `context` schema (a SQLAlchemy write-guard on the write path, a read-only transaction on the read path), and every row is scoped to your `user_id` — so a guest's capture can never read back across the boundary.
+Use the database to manage projects, meetings, reminders, notes, and contacts. @context maps what you tell it onto the right table — no forms, no fields — and can create new tables on demand.
 
-Plain language, again:
+@context's database lives in the `context` Postgres schema: writes are confined to that schema and every row is scoped to your `user_id`, so a guest's capture can never read back across the boundary. See [`docs/CRM.md`](docs/CRM.md) for the schema, the filing rules, and the write boundary.
+
+This lets @context handle requests like:
 - *"Add Dana Reyes, Head of Platform at Acme, dana@acme.com — and remind me to send her the integration spec next Tuesday."* — one sentence, two writes (a contact *and* a dated reminder), with "next Tuesday" resolved to a date.
 - *"Who do I know at Acme?"*
 - *"What reminders do I have coming up?"* — time-aware: pending reminders by due date.
 - *"Tell me about Northwind."* — sweeps contacts, notes, projects, reminders, and meetings by tag, and folds in the knowledge base.
-
-Read [`docs/CRM.md`](docs/CRM.md) for the schema, the filing rules, and the write boundary.
 
 ## Run in production
 
