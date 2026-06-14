@@ -51,7 +51,46 @@ echo ""
 # them here so up.sh stays the single owner of these.
 SKIP_KEYS=" DB_HOST PORT "
 
-count=0
+# Pull the service's current variables once. We diff against this so the sync
+# only pushes keys that are new or changed — every push is a deploy trigger, so
+# re-sending an unchanged value would redeploy for nothing. Falls back to
+# "push everything" if the read fails (still one batched deploy, see below).
+current_json="$(railway variables --json --service agent-os 2>/dev/null || true)"
+if ! echo "$current_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    echo -e "${DIM}  Could not read current Railway variables — will push all keys.${NC}"
+    current_json=""
+fi
+
+# Decide whether a parsed key/value pair needs pushing, and queue it if so.
+# Mutates set_args / changed / unchanged in the current shell (no subshell).
+declare -a set_args=()
+changed=0
+unchanged=0
+
+queue_if_changed() {
+    local key="$1" value="$2"
+
+    if [[ "$SKIP_KEYS" == *" ${key} "* ]]; then
+        echo -e "${DIM}  Skipping ${key} (managed by up.sh)${NC}"
+        return
+    fi
+
+    if [[ -n "$current_json" ]] && echo "$current_json" | jq -e --arg k "$key" 'has($k)' >/dev/null 2>&1; then
+        local existing
+        existing="$(echo "$current_json" | jq -r --arg k "$key" '.[$k]')"
+        if [[ "$existing" == "$value" ]]; then
+            unchanged=$((unchanged + 1))
+            return
+        fi
+        echo -e "${DIM}  ~ ${key} (changed)${NC}"
+    else
+        echo -e "${DIM}  + ${key} (new)${NC}"
+    fi
+
+    set_args+=("${key}=${value}")
+    changed=$((changed + 1))
+}
+
 current_key=""
 current_value=""
 
@@ -82,22 +121,24 @@ ${line}"
     current_value="${current_value#\'}"
     current_value="${current_value%\'}"
 
-    if [[ "$SKIP_KEYS" == *" ${current_key} "* ]]; then
-        echo -e "${DIM}  Skipping ${current_key} (managed by up.sh)${NC}"
-        current_key=""
-        current_value=""
-        continue
-    fi
-
-    echo -e "${DIM}  Setting ${current_key}${NC}"
-    railway variables --set "${current_key}=${current_value}" --service agent-os 2>/dev/null
-    count=$((count + 1))
+    queue_if_changed "$current_key" "$current_value"
 
     current_key=""
     current_value=""
 done < "$ENV_FILE"
 
 echo ""
-echo -e "${BOLD}Done.${NC} Synced ${count} variable(s) to Railway."
-echo -e "${DIM}Railway will auto-redeploy if values changed.${NC}"
+if [[ ${#set_args[@]} -eq 0 ]]; then
+    echo -e "${BOLD}Nothing to sync.${NC} ${unchanged} variable(s) already up to date — no redeploy."
+    echo ""
+    exit 0
+fi
+
+# One batched write for every changed key → Railway redeploys once, not once
+# per variable. (Per-call writes are why a 6-var sync used to fire 6 deploys.)
+railway variables set --service agent-os "${set_args[@]}" >/dev/null 2>&1
+
+echo ""
+echo -e "${BOLD}Done.${NC} Pushed ${changed} changed variable(s) in one batch (${unchanged} unchanged)."
+echo -e "${DIM}Railway redeploys once for the batch.${NC}"
 echo ""
