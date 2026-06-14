@@ -220,7 +220,7 @@ Configure Google credentials (either auth path) and the `gmail` + `calendar` pro
 ./scripts/railway/redeploy.sh  # redeploy after code changes
 ```
 
-`up.sh` forwards everything set in `.env.production` — including `OWNER_ID` and the multi-line `JWT_VERIFICATION_KEY` — so **set `OWNER_ID` to your real identity** (Slack email and/or JWT `sub`) before running. JWT auth is on by default, and os.agno.com needs your Railway domain to mint the key, so `up.sh` creates the domain *before* deploying: if `JWT_VERIFICATION_KEY` isn't set yet, it prints the fresh domain and pauses while you mint the key (Add OS → Live → Token Based Authorization) and paste it into `.env.production` — press Enter and the first deploy comes up serving. `AGENTOS_URL` defaults to the new domain. For later env changes, run `./scripts/railway/env-sync.sh` and Railway auto-redeploys.
+`up.sh` forwards everything set in `.env.production` — including `OWNER_ID` and the multi-line `JWT_VERIFICATION_KEY` — so **set `OWNER_ID` to your real identity** (Slack email and/or JWT `sub`) before running. JWT auth is on by default, and os.agno.com needs your Railway domain to mint the key, so `up.sh` creates the domain *before* deploying: if `JWT_VERIFICATION_KEY` isn't set yet, it prints the fresh domain and pauses while you mint the key (Connect AgentOS → Live → Token Based Authorization) and paste it into `.env.production` — press Enter and the first deploy comes up serving. `AGENTOS_URL` defaults to the new domain. For later env changes, run `./scripts/railway/env-sync.sh` and Railway auto-redeploys.
 
 The Railway *project* is `agent-platform`; the app *service* is `agent-os`.
 

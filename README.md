@@ -60,7 +60,7 @@ Confirm it is live at [http://localhost:8000/docs](http://localhost:8000/docs).
 Connect the AgentOS UI to interact with @context:
 
 1. Open [os.agno.com](https://os.agno.com) and sign in with your email (the same one you set as `OWNER_ID`).
-2. Click **Add OS → Local**.
+2. Click **Connect AgentOS → Local**.
 3. Enter `http://localhost:8000` and name it "Local Context".
 4. Connect.
 
@@ -121,66 +121,77 @@ Here are the runtime skills that are included in the repo:
 
 The repo includes script to run on Railway. The `scripts/railway/up.sh` script will run @context as a service with Postgres on the same private network. It reads credentials from `.env.production`, and creates a public domain you connect to in the AgentOS UI.
 
-> Requires the [Railway CLI](https://docs.railway.com/cli#installing-the-cli) and `railway login`.
+> Requires the [Railway CLI](https://docs.railway.com/cli#installing-the-cli)
 
 ### 1. Production env
 
+Create the production environment file.
+
 ```sh
 cp .env .env.production
-# Edit .env.production with production values
 ```
 
 The deploy scripts read `.env.production` first and falls back to `.env` if it doesn't exist.
 
-Remember to set `OWNER_ID` and `OWNER_NAME`. List every identity that should be considered as the owner, AgentOS email, Slack email.
+### 2. Deploy
+
+Run the `up.sh` script to run @context + postgres on Railway.
+
+First, login to Railway.
 
 ```sh
-# .env.production
-OWNER_ID=owner@example.com
+railway login
 ```
 
-### 2. Deploy
+Then run the `up.sh` script.
 
 ```sh
 ./scripts/railway/up.sh
 ```
 
-This provisions Postgres and the app service on the same private network, creates your public domain, and forwards everything in `.env.production`. `AGENTOS_URL` defaults to the new domain so the scheduler can reach AgentOS.
+The script will now pause and wait for you to mint the JWT verification key.
 
-### 3. Claim it
+### 3. Enable Token Based Authorization
 
-Token-Based Authorization is on by default. Without `JWT_VERIFICATION_KEY`, the app refuses to serve traffic. That is the safe default for an agent that speaks for you. os.agno.com needs your domain to mint the key, so `up.sh` creates the domain first, prints it, and pauses.
+Token-Based Authorization is on by default. Without the `JWT_VERIFICATION_KEY` environment variable in `.env.production`, the AgentOS will not serve traffic. That is the safe default for an agent that has access to sensitive information. You can issue and verify your own JWT (see [BYO JWT](https://docs.agno.com/agent-os/security/authorization/self-hosted)) or mint a JWT verification key at [os.agno.com](https://os.agno.com).
 
-> **Heads up.** Live connections at os.agno.com are a paid feature. Use coupon `PLATFORM30` for a one-month free trial.
+The `up.sh` script pauses and waits for you to add the JWT verification key to `.env.production`. Here's how you can get one from os.agno.com:
 
-1. Open [os.agno.com](https://os.agno.com), click **Add OS → Live**, enter the domain `up.sh` printed, and connect.
-2. Enable **Token Based Authorization** and paste the public key into `.env.production` (full PEM block, no quotes):
-
-   ```sh
-   JWT_VERIFICATION_KEY=-----BEGIN PUBLIC KEY-----
-   MIIBIjANBgkq...
-   -----END PUBLIC KEY-----
-   ```
-
-3. Back in the terminal, press Enter. `up.sh` pushes the key and deploys. The first deploy comes up serving.
-
-Set the key later? Add it to `.env.production` and run `./scripts/railway/env-sync.sh`. Railway auto-redeploys.
+1. Open [os.agno.com](https://os.agno.com), click **Connect AgentOS → Live**
+2. The `up.sh` script will print the AgentOS domain, paste it into the input field.
+3. Enable **Token Based Authorization** and click **Connect**.
+4. Copy the public key and paste it into `.env.production`.
+5. Back in the terminal, press Enter. `up.sh` will read the key and deploy the AgentOS service to Railway.
 
 ### 4. Verify
 
+You can verify the deployment on the Railway dashboard or in the terminal by watching the logs:
+
 ```sh
-railway logs --service agent-os      # watch it come up
+railway logs --service agent-os
 ```
 
-For any later env change, edit `.env.production` and run `./scripts/railway/env-sync.sh`.
+If you add/update any values in `.env.production`, you can sync them to Railway with:
+
+```sh
+./scripts/railway/env-sync.sh
+```
 
 ### 5. Redeploy after code changes
+
+If you make code changes (which you most definitely will), you can redeploy the AgentOS service to Railway with:
 
 ```sh
 ./scripts/railway/redeploy.sh
 ```
 
-Or connect the repo in the Railway dashboard (agent-os service → Settings → Source) and set the deploy branch to `main` for auto-deploy on every push. The default deploy is two replicas at 4Gi / 2 vCPU. Raise `numReplicas` and `limits` in [`railway.json`](railway.json) as usage grows.
+Or enable auto-deploy in the Railway dashboard:
+
+1. Open the Railway dashboard
+2. Navigate to the agent-os service
+3. Click **Settings**
+4. Click **Source** and select the git repo for this project
+5. Set the deploy branch to `main` and click **Save (or Deploy)**
 
 ## Talk to it from Slack
 
