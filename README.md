@@ -1,6 +1,6 @@
 # @context - a professional alter ego
 
-@context is a self-hosted alter ego: it captures your work context and organizes it using a private crm and knowledge base. @context is designed with privacy and security as a guiding principle. You own everything - your keys, your cloud, your data.
+@context is a self-hosted alter ego: it manages your work context and organizes it using a private crm and knowledge base. @context is designed with privacy and security as the guiding principle. You own everything - your keys, your cloud, your data.
 
 @context runs in two modes:
 
@@ -18,12 +18,12 @@
 1. **Maintain a crm.** Share *"met Kyle from Agno, wants a partnership, follow up next week"* and it stores a contact, a note, and a dated reminder without you picking forms or fields.
 2. **Maintain a knowledge base.** @context can write product specs, parse notes from customer interviews, manage project briefs and conduct deep research, and maintain it all in a neatly organized knowledge base.
 3. **Run your day, plan your week, prep for what's next.** @context can run playbooks to run your day, plan your week, and prep for meetings. @context comes with a few playbooks but you should definitely customize and add your own. Here are the included ones:
-   - **Rundown** *("what's on today?")* — a prioritized brief of things on your plate, one digest instead of five apps: the updates teammates (and their agents) left in your queue, reminders that are due, today's meetings, the emails you missed, and the Slack threads worth a look.
-   - **Week plan** *("what's my week?")* — priorities for the week. Run this on a schedule sunday night to start your week with 🔥
-   - **Prep** *("prep for my 2pm with Kyle")* — a tight pre-meeting brief: who they are, notes, past threads, what's still open, email and Slack exchanges, and — for not known contacts — public background pulled from the web.
+   - **Rundown** *("what's on today?")* - a prioritized brief of things on your plate. One digest instead of five apps: the updates teammates (and their agents) left in your queue, reminders that are due, today's meetings, the emails you missed, and the Slack threads worth a look.
+   - **Week plan** *("what's my week?")* - priorities for the week. Runs sunday evening and lands in your DMs, so you start the week with 🔥
+   - **Prep** *("prep for my 2pm with Kyle")* - a tight pre-meeting brief: who they are, notes, past threads, what's still open, email and Slack exchanges, and - for not known contacts - public background pulled from the web.
 
-   @context can run these playbooks on demand or on a schedule, and send the results to Slack.
-4. **Represent you.** Your teammates (and their agents) can share non-urgent updates with your @context. A teammate types *"@your-context my claude fixed the auth bug"* and it's saved to your queue — surfacing in your next rundown. This keeps your signal-to-noise high.
+   @context runs these playbooks on demand or on a schedule: the daily rundown and weekly plan will DM the brief straight to you.
+4. **Represent you.** Your teammates (and their agents) can share non-urgent updates with your @context. A teammate types *"@your-context my claude fixed the auth bug"* and it's saved to your queue - surfacing in your next rundown. It works outbound too: your @context can message people and channels on Slack on your behalf, and @-mention a teammate's @context to drop an update in *their* queue - which is how a team's contexts talk to each other ([federation](docs/FEDERATION.md)). This keeps your signal-to-noise high.
 5. **Act, with your approval.** Connect [Gmail and Calendar](docs/GOOGLE.md) and it can send follow-ups and put meetings on your calendar. Tools that take external actions explicitly wait for your approval on the AgentOS UI before they execute.
 
 ## Security
@@ -90,31 +90,27 @@ Notes:
 
 ## @context Knowledge Base
 
-@context comes with a filesystem-backed **document store** that gives it long-term **document memory**. @context uses `query_knowledge` to read, `update_knowledge` to write to this knowledge base.
+@context comes with a long-term knowledge base that acts as its second brain, and yours. @context stores everything from product specs, customer interviews, project briefs, research and decisions to "what I know about X" pages in this knowledge base.
 
-Use the knowledge base to manage design specs, runbooks, decisions, and "what I know about X" pages.
+The knowledge base is filesystem-backed by default (a gitignored `knowledge/` folder in this repo) but I highly recommend pointing it to a git repo or notion database for production. See [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) for the full guide.
 
-@context's knowledge base is filesystem-backed by default (a gitignored `knowledge/` folder), but we highly recommend backing it with a Git repo. See [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) for more details and how to use Git as a backend.
+Try:
+- *"Research how we can build our own agent platform using agno"*
+- *"What are the advantages of owning our own agent platform?"*
 
-This lets @context handle requests like:
-- *"What do we know about the Acme partnership?"* — sweeps the knowledge base (and the CRM) and tells you honestly if it's still just a stub.
-- *"Summarize the agent-factories spec — the design and where it stands."* — resolves the index → the spec folder, citing the sub-files.
-- *"What's our pgvector standard for new services?"*
-- *"Write up a decision: we're standardizing on pgvector 18."* — files it as the next ADR in the right spec's `decisions.md`.
-
-## @context Database (CRM)
+## @context CRM
 
 @context comes with a Postgres-backed **database** that gives it long-term **structured memory**. @context uses `query_crm` to read, `update_crm` to write to this database.
 
-Use the database to manage projects, meetings, reminders, notes, and contacts. @context maps what you tell it onto the right table — no forms, no fields — and can create new tables on demand.
+Use the database to manage projects, meetings, reminders, notes, and contacts. @context maps what you tell it onto the right table - no forms, no fields - and can create new tables on demand.
 
 @context's database lives in the `context` Postgres schema: writes are confined to that schema and every row is scoped to your `user_id`, so a guest's capture can never read back across the boundary. See [`docs/CRM.md`](docs/CRM.md) for the schema, the filing rules, and the write boundary.
 
 This lets @context handle requests like:
-- *"Add Dana Reyes, Head of Platform at Acme, dana@acme.com — and remind me to send her the integration spec next Tuesday."* — one sentence, two writes (a contact *and* a dated reminder), with "next Tuesday" resolved to a date.
+- *"Add Dana Reyes, Head of Platform at Acme, dana@acme.com - and remind me to send her the integration spec next Tuesday."* - one sentence, two writes (a contact *and* a dated reminder), with "next Tuesday" resolved to a date.
 - *"Who do I know at Acme?"*
-- *"What reminders do I have coming up?"* — time-aware: pending reminders by due date.
-- *"Tell me about Northwind."* — sweeps contacts, notes, projects, reminders, and meetings by tag, and folds in the knowledge base.
+- *"What reminders do I have coming up?"* - time-aware: pending reminders by due date.
+- *"Tell me about Northwind."* - sweeps contacts, notes, projects, reminders, and meetings by tag, and folds in the knowledge base.
 
 ## Run in production
 
@@ -196,7 +192,7 @@ Or enable auto-deploy in the Railway dashboard:
 
 ### 6. Point Slack at production
 
-If you set Slack up locally, your Slack app's request URLs still point at your ngrok tunnel — i.e. your laptop — so events never reach the deployed instance.
+If you set Slack up locally, your Slack app's request URLs still point at your ngrok tunnel - i.e. your laptop - so events never reach the deployed instance.
 
 Repoint the `/slack/events` and `/slack/interactions` request URLs to your Railway domain. AgentOS must already be deployed and serving (JWT key in place) so Slack's URL re-verification passes.
 
@@ -244,7 +240,7 @@ Acting as you is double-gated: the act tools exist only in your toolset, and eve
 
 ## Evals
 
-The eval suite ([`evals/`](evals/)) is the regression net, and it's built around the one claim that matters: *anyone can write, only you can read.* A deterministic gate proves — with no model in the loop — that a guest's resolved toolset is exactly `submit_update`; adversarial guest cases confirm it refuses to read or leak owner data (even under a prompt-injection that tells it to act as you), and owner cases confirm it actually captures, retrieves, and admits what it can't find. Tool-call and trace-level checks are the spine; an LLM judge corroborates.
+The eval suite ([`evals/`](evals/)) is the regression net, and it's built around the one claim that matters: *anyone can write, only you can read.* A deterministic gate proves - with no model in the loop - that a guest's resolved toolset is exactly `submit_update`; adversarial guest cases confirm it refuses to read or leak owner data (even under a prompt-injection that tells it to act as you), and owner cases confirm it actually captures, retrieves, and admits what it can't find. Tool-call and trace-level checks are the spine; an LLM judge corroborates.
 
 ```sh
 python -m evals                # run the suite
@@ -266,7 +262,8 @@ python -m evals --case <name>  # one case
 | `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production. |
 | `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Set it when running more than one replica behind one URL. |
 | `PARALLEL_API_KEY` | no | none | Switches the `web` source from keyless Parallel MCP to the authenticated SDK (higher rate ceiling). |
-| `SLACK_BOT_TOKEN` / `SLACK_SIGNING_SECRET` | no | none | Both enable the Slack interface. The bot token alone activates the `slack` source. See [`docs/SLACK.md`](docs/SLACK.md). |
+| `SLACK_BOT_TOKEN` / `SLACK_SIGNING_SECRET` | no | none | Both enable the Slack interface. The bot token alone activates the `slack` source (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests. See [`docs/SLACK.md`](docs/SLACK.md). |
+| `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` | no | `0 13 * * *` / `0 22 * * 0` | UTC cron for the Slack-delivered daily rundown and weekly plan (only armed when Slack is set). See [`docs/SLACK.md`](docs/SLACK.md). |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` / `GOOGLE_DELEGATED_USER` | no | none | Service-account path for the `gmail` + `calendar` sources (Workspace, headless). See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | no | none | The service-account key, base64, for platforms without secret-file mounts. The entrypoint materializes it. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | none | OAuth client for the `gmail` + `calendar` sources (personal accounts, tokens minted locally). |
