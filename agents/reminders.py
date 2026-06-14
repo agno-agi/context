@@ -36,16 +36,15 @@ reaches the owner's reminders.
 """
 
 from datetime import datetime, timezone
-from os import getenv
 
 from agno.exceptions import StopAgentRun
 from agno.run import RunContext
 from agno.tools import tool
-from agno.utils.log import log_warning
 from agno.workflow.step import StepInput, StepOutput
 from sqlalchemy import text
 
-from app.identity import CANONICAL_OWNER_ID, is_owner, owner_email
+from agents.notify import dm_owner
+from app.identity import CANONICAL_OWNER_ID, is_owner
 from db import SCHEMA, get_sql_engine
 
 _REMINDERS = f"{SCHEMA}.reminders"
@@ -60,48 +59,16 @@ def _format_due(due_at: datetime) -> str:
     return d.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _slack_dm_target() -> tuple[str, str] | None:
-    """The (bot token, owner email) an owner DM needs — or `None` when unavailable.
-
-    Availability is gated on the actual env config: `SLACK_BOT_TOKEN` (the bot
-    token that sends the message) and an owner email (an `OWNER_ID` entry that
-    looks like one, resolving the IM via `users.lookupByEmail`). Both must be set
-    or there is no DM. `SLACK_SIGNING_SECRET` only verifies *inbound* Slack
-    requests, so it plays no part in an outbound DM — sending needs just the token,
-    with the `users:read.email`, `im:write`, `chat:write` scopes (in the manifest,
-    see `docs/SLACK.md`).
-    """
-    token = getenv("SLACK_BOT_TOKEN")
-    email = owner_email()
-    if token and email:
-        return token, email
-    return None
-
-
 def _ping_owner_on_slack(due: list) -> None:
     """Best-effort: DM the owner a short summary of the reminders just queued.
 
-    The inbound queue is the source of truth — this is only a proactive nudge, so
-    every failure is logged and swallowed rather than failing the sweep. No-op
-    unless Slack DMs are available (see `_slack_dm_target`).
+    The inbound queue is the source of truth — this is only a proactive nudge, so a
+    failed DM never fails the sweep. Delivery (and the no-op-when-unconfigured
+    behaviour) lives in `agents.notify.dm_owner`; here we only format the message.
     """
-    target = _slack_dm_target()
-    if target is None:
-        return
-    token, email = target
-
-    try:
-        from slack_sdk import WebClient
-
-        client = WebClient(token=token)
-        user_id = client.users_lookupByEmail(email=email)["user"]["id"]
-        channel = client.conversations_open(users=[user_id])["channel"]["id"]
-
-        lines = "\n".join(f"• {r.title} — due {_format_due(r.due_at)}" for r in due)
-        header = f"🔔 *{len(due)} reminder{'' if len(due) == 1 else 's'} due*"
-        client.chat_postMessage(channel=channel, text=f"{header}\n{lines}")
-    except Exception as exc:
-        log_warning(f"queue-reminders: could not DM the owner on Slack: {exc}")
+    lines = "\n".join(f"• {r.title} — due {_format_due(r.due_at)}" for r in due)
+    header = f"🔔 *{len(due)} reminder{'' if len(due) == 1 else 's'} due*"
+    dm_owner(f"{header}\n{lines}")
 
 
 def _queue_reminders(notify_slack: bool = False) -> str:

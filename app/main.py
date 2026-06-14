@@ -15,6 +15,7 @@ from agno.workflow.step import Step
 from agno.workflow.workflow import Workflow
 
 from agents.context import context
+from agents.digest import daily_digest_step, weekly_digest_step
 from agents.reminders import queue_reminders_step
 from agents.sources import close_context_providers, setup_context_providers
 from app.identity import owner_configured
@@ -38,6 +39,26 @@ queue_reminders_workflow = Workflow(
     steps=[Step(name="queue-reminders", executor=queue_reminders_step)],  # type: ignore[arg-type]
 )
 
+# The scheduled digests: the owner's read-only playbooks (daily rundown, weekly
+# week-plan) run on a schedule and DM'd to Slack. Each is a one-step workflow that
+# runs the playbook as the owner and self-DMs the result (see agents/digest.py).
+# Registered only when Slack is configured (see register_schedules).
+daily_digest_workflow = Workflow(
+    id="daily-digest",
+    name="Daily Digest",
+    description="Run the daily rundown and DM it to the owner on Slack.",
+    db=db,
+    steps=[Step(name="daily-digest", executor=daily_digest_step)],  # type: ignore[arg-type]
+)
+
+weekly_digest_workflow = Workflow(
+    id="weekly-digest",
+    name="Weekly Digest",
+    description="Run the week-plan and DM it to the owner on Slack.",
+    db=db,
+    steps=[Step(name="weekly-digest", executor=weekly_digest_step)],  # type: ignore[arg-type]
+)
+
 
 def register_schedules() -> None:
     """Register @context's background schedules (idempotent — safe on every boot).
@@ -53,9 +74,17 @@ def register_schedules() -> None:
       and sweeps `context.reminders` for anything now due into the inbound queue
       (see `agents/reminders.py`). It's a workflow, not an agent run, so the
       sweep fires deterministically — no model deciding whether to call a tool.
+
+    - daily-digest / weekly-digest: registered **only when Slack is configured**
+      (delivery is a Slack DM, so there's no point arming them otherwise). Each
+      hits its digest workflow, which runs a read-only playbook as the owner and
+      DMs the result (see `agents/digest.py`). Cron is tunable via
+      `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC); defaults are a weekday-
+      morning rundown and a Sunday-evening week-plan.
     """
     try:
-        ScheduleManager(db).create(
+        manager = ScheduleManager(db)
+        manager.create(
             name="queue-reminders",
             cron="0 * * * *",  # hourly, on the hour (UTC)
             endpoint="/workflows/queue-reminders/runs",
@@ -64,6 +93,27 @@ def register_schedules() -> None:
             if_exists="update",
         )
         log_info("@context: registered schedule 'queue-reminders'")
+
+        # "If the Slack thing is active, the schedule comes on." The digests
+        # deliver over Slack DM, so they only make sense with a bot token set.
+        if getenv("SLACK_BOT_TOKEN"):
+            manager.create(
+                name="daily-digest",
+                cron=getenv("DAILY_DIGEST_CRON", "0 13 * * *"),  # 13:00 UTC daily
+                endpoint="/workflows/daily-digest/runs",
+                payload={"message": "Scheduled daily rundown digest."},
+                description="Daily: DM the owner their rundown on Slack.",
+                if_exists="update",
+            )
+            manager.create(
+                name="weekly-digest",
+                cron=getenv("WEEKLY_DIGEST_CRON", "0 22 * * 0"),  # Sun 22:00 UTC
+                endpoint="/workflows/weekly-digest/runs",
+                payload={"message": "Scheduled weekly plan digest."},
+                description="Weekly: DM the owner their week-plan on Slack.",
+                if_exists="update",
+            )
+            log_info("@context: registered schedules 'daily-digest', 'weekly-digest' (Slack active)")
     except Exception as exc:
         log_warning(f"@context: could not register schedules: {exc}")
 
@@ -142,7 +192,7 @@ agent_os = AgentOS(
     lifespan=lifespan,
     db=db,
     agents=[context],
-    workflows=[queue_reminders_workflow],
+    workflows=[queue_reminders_workflow, daily_digest_workflow, weekly_digest_workflow],
     interfaces=interfaces,
     config=str(Path(__file__).parent / "config.yaml"),  # Quick prompts for the agents.
     # Enable JWT based authorization in production.

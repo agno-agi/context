@@ -21,14 +21,16 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │   ├── knowledge  WikiContextProvider            knowledge base — specs (FS → Git)  R/W  always on
 │   ├── workspace  WorkspaceContextProvider       this repo's files                  R    always on
 │   ├── web        WebContextProvider             Parallel (SDK or keyless MCP)      R    always on
-│   ├── slack      SlackContextProvider           channel / DM history               R    SLACK_BOT_TOKEN set
+│   ├── slack      SlackContextProvider           channel / DM history; send = update_slack (ungated)  R/W  SLACK_BOT_TOKEN set
 │   ├── gmail      GmailContextProvider           inbox; send = act tool (approval)  R/W* GOOGLE_* set
 │   └── calendar   GoogleCalendarContextProvider  events; write = act tool (approval) R/W* GOOGLE_* set
-│        (*act tools — update_gmail / update_calendar — pause for per-call owner approval)
+│        (*act tools — update_gmail / update_calendar — pause for per-call owner approval; update_slack is NOT an act tool — messaging is ungated)
 │
 ├── Inbound queue (agents/inbox.py)             submit_update / rundown / acknowledge
 │
 ├── Reminder sweep (agents/reminders.py)        queue_reminders → inbound queue  (hourly workflow schedule, owner-only)
+├── Scheduled digests (agents/digest.py)        daily rundown / weekly week-plan → owner Slack DM (auto-armed when SLACK_BOT_TOKEN set)
+├── Owner notify (agents/notify.py)             dm_owner() — self-notification path shared by the reminder sweep + digests
 │
 ├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today
 │
@@ -56,6 +58,8 @@ Shared:
 | [`agents/instructions.py`](agents/instructions.py) | `CONTEXT_INSTRUCTIONS` + the `crm` and `knowledge` read/write sub-agent prompts (`crm` rendered table-aware from the schema spec; `knowledge` specs-aware). |
 | [`agents/inbox.py`](agents/inbox.py) | The inbound queue — `submit_update` (everyone), `rundown` / `acknowledge` (owner-only). |
 | [`agents/reminders.py`](agents/reminders.py) | The reminder sweep — `_queue_reminders` claims due reminders and files them into the inbound queue. Exposed two ways: the `queue_reminders` owner tool (manual) and the `queue-reminders` workflow step (run hourly by the schedule, deterministically). Owner-only on both. |
+| [`agents/digest.py`](agents/digest.py) | The scheduled digests — `daily_digest_step` / `weekly_digest_step` run a read-only playbook (rundown / week-plan) as the owner and DM the result. Driven by the `daily-digest` / `weekly-digest` workflow schedules, which auto-arm when `SLACK_BOT_TOKEN` is set. |
+| [`agents/notify.py`](agents/notify.py) | `dm_owner()` — the shared, ungated self-notification path (DM the owner on Slack). Used by the reminder sweep and the digests. No-op unless a bot token + owner email are configured. |
 | [`agents/policy.py`](agents/policy.py) | Defense-in-depth hooks — `normalize_identity` (pre) + `enforce_capture_only` (tool). |
 | [`skills/`](skills/) | Runtime skills — owner-only playbooks, one `SKILL.md` per folder (`week-plan`, `daily-rundown`, `prep-for`, `process-today`). Loaded + owner-gated by `context.py`; the agent uses them via progressive disclosure. |
 | [`.agents/skills/`](.agents/skills/) | Dev-time **coding-agent workflows** (`extend-agent`, `improve-agent`, `eval-and-improve`, `review-and-improve`) — slash commands coding agents run *on this repo*, distinct from the runtime skills above. `.claude/skills` is a committed symlink here — see "Working with coding agents". |
@@ -78,7 +82,7 @@ This is the heart of the product — read [`docs/SECURITY.md`](docs/SECURITY.md)
 
 One deliberate exception rides outside the identity-conditioned toolset: the agent's `learning=LearningMachine(...)` (user profile + user memory, agentic mode) hands **every** caller two learning tools — `update_user_memory` and `update_profile` — so @context remembers the people (and agents) who talk to it. Memories and profile fields are keyed to the caller's own verified `user_id` and surface only on that caller's later runs — a teammate's memories never touch the owner's data, so this adds no read path across the boundary.
 
-Act tools get a second gate on top of the toolset: the tools named in `ACT_TOOLS` ([`agents/sources.py`](agents/sources.py) — `update_gmail`, `update_calendar`) are flagged `requires_confirmation` per run in [`context_tools()`](agents/context.py), so the run pauses for the owner's explicit approval before anything outward-facing executes. Add any new act-on-the-world tool to `ACT_TOOLS` — don't ship one ungated. The full enforcement layers, threat model, and trust roots live in [`docs/SECURITY.md`](docs/SECURITY.md).
+Act tools get a second gate on top of the toolset: the tools named in `ACT_TOOLS` ([`agents/sources.py`](agents/sources.py) — `update_gmail`, `update_calendar`) are flagged `requires_confirmation` per run in [`context_tools()`](agents/context.py), so the run pauses for the owner's explicit approval before anything outward-facing executes. When you add a *sensitive* act-on-the-world tool, add it to `ACT_TOOLS` — don't ship one ungated. The deliberate exception is **`update_slack`**: sending a Slack message is ordinary communication, not a sensitive act, so it's intentionally left out of `ACT_TOOLS` and runs ungated (still owner-only, since it rides the provider surface). This ungated messaging is what powers context-to-context federation — see [`docs/FEDERATION.md`](docs/FEDERATION.md). The full enforcement layers, threat model, and trust roots live in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Development Setup
 
@@ -172,8 +176,10 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 | `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production so cron triggers reach AgentOS. |
 | `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Auto-generated per process; pin it when running multiple replicas behind one URL (railway.json ships two). |
 | `PARALLEL_API_KEY` | no | — | Switches the `web` provider from the keyless Parallel MCP endpoint to the authenticated Parallel SDK (higher rate ceiling). |
-| `SLACK_BOT_TOKEN` | no | — | Bot token. Activates the `slack` provider on its own; set with the signing secret to enable the Slack interface ([`docs/SLACK.md`](docs/SLACK.md)). |
+| `SLACK_BOT_TOKEN` | no | — | Bot token. Activates the `slack` provider on its own (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests; set with the signing secret to enable the Slack interface ([`docs/SLACK.md`](docs/SLACK.md)). |
 | `SLACK_SIGNING_SECRET` | no | — | Signing secret. Both must be set for the interface to load. |
+| `DAILY_DIGEST_CRON` | no | `0 13 * * *` | UTC cron for the Slack-delivered daily rundown digest (only armed when `SLACK_BOT_TOKEN` is set). |
+| `WEEKLY_DIGEST_CRON` | no | `0 22 * * 0` | UTC cron for the Slack-delivered weekly week-plan digest (only armed when `SLACK_BOT_TOKEN` is set). |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | no | — | Service-account JSON key path — activates the `gmail` + `calendar` providers (headless; Gmail needs `GOOGLE_DELEGATED_USER`). See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
 | `GOOGLE_DELEGATED_USER` | no | — | The mailbox/calendar the service account acts as (domain-wide delegation). |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | no | — | The key as base64 for platforms without secret-file mounts — the entrypoint materializes it and sets `GOOGLE_SERVICE_ACCOUNT_FILE`. |
@@ -194,21 +200,23 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 
 ## Scheduler
 
-`scheduler=True` is on in [`app/main.py`](app/main.py), and `register_schedules()` registers one schedule on every boot (idempotent):
+`scheduler=True` is on in [`app/main.py`](app/main.py), and `register_schedules()` registers schedules on every boot (idempotent). The reminder sweep always; the digests only when Slack is configured:
 
 - **`queue-reminders`** — hourly (on the hour, UTC), the schedule hits the `queue-reminders` workflow (`/workflows/queue-reminders/runs`), whose one step runs `_queue_reminders` ([`agents/reminders.py`](agents/reminders.py)) on the owner surface. It sweeps `context.reminders` for anything now due and drops it into the inbound queue, where the next rundown surfaces it. `notified_at` is stamped (via an atomic claim) so each reminder fires exactly once. It's a workflow, not an agent run, so the sweep fires deterministically — nothing depends on a model choosing to call a tool.
+- **`daily-digest` / `weekly-digest`** — registered **only when `SLACK_BOT_TOKEN` is set** (delivery is a Slack DM, so there's no point otherwise). Each hits its digest workflow ([`agents/digest.py`](agents/digest.py)), which runs a read-only playbook as the owner (daily rundown, weekly week-plan) and DMs the result via `dm_owner` ([`agents/notify.py`](agents/notify.py)). Read-only, so no act tool fires; the DM is self-notification, so it's ungated and completes unattended. Timing is tunable via `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC; defaults `0 13 * * *` and `0 22 * * 0`).
 
 Hand the scheduler any other agent / workflow + a cron expression to add more. Natural fits for `@context`:
 
-- **A morning digest** — query `context.meetings` (next 7d) + `context.reminders` (due/overdue) and post a "what's coming up" digest to Slack.
 - **Maintenance** — purge acknowledged updates older than N days; vacuum tables.
 - **Periodic re-evaluation** — run `python -m evals` weekly to catch regressions.
 
-Identity: the scheduler authenticates its run triggers with AgentOS's internal service token, and those runs arrive as the verified `__scheduler__` identity — which [`is_owner`](app/identity.py) honors as the owner (once `OWNER_ID` is set), so scheduled playbooks get the owner surface and key their writes under the canonical id. Act tools still pause for approval, so unattended runs can read and file but never send. Running >1 replica? Pin `INTERNAL_SERVICE_TOKEN`. See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler) for the cron API.
+Identity: the scheduler authenticates its run triggers with AgentOS's internal service token, and those runs arrive as the verified `__scheduler__` identity — which [`is_owner`](app/identity.py) honors as the owner (once `OWNER_ID` is set), so scheduled playbooks get the owner surface and key their writes under the canonical id. The gated act tools (mail, calendar) still pause for approval, so unattended runs can read, file, and message on Slack but never send mail or change the calendar. Running >1 replica? Pin `INTERNAL_SERVICE_TOKEN`. See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler) for the cron API.
 
 ## Slack
 
 Set `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` and restart. The wiring in [`app/main.py`](app/main.py) routes Slack messages to `context` with `resolve_user_identity=True` — so a teammate who @-mentions it files an update (capture-only), and the owner gets the full surface. [`docs/SLACK.md`](docs/SLACK.md) has the app manifest and full setup. For Discord, Telegram, WhatsApp, and custom UIs, mirror the same conditional with the relevant Agno interface.
+
+The bot token alone (no signing secret) still activates the `slack` provider, which now exposes both `query_slack` and `update_slack` (the ungated send tool). Sending is what enables **context-to-context federation**: the owner's context can @-mention a teammate's `@context`, which receives it through *its own* Slack interface as a guest and files it in that owner's queue — the owner/guest asymmetry holding across the network. See [`docs/FEDERATION.md`](docs/FEDERATION.md). With a bot token set, the daily/weekly **digests** also auto-arm (see Scheduler).
 
 ## Gmail + Google Calendar
 

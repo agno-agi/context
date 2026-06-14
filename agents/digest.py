@@ -1,0 +1,76 @@
+"""
+Scheduled Digests
+=================
+
+The owner's read-only playbooks (the daily **rundown**, the weekly **week-plan**)
+delivered on a schedule to their Slack DM — so the brief reaches the owner the
+moment it's due instead of waiting to be asked.
+
+Each digest is a one-step workflow run by the scheduler (see `app/main.py`):
+1. Run the playbook as the owner. The scheduled run arrives as `__scheduler__`,
+   which `is_owner` honors, and we invoke the agent under the canonical owner id so
+   the playbook gets the full owner surface and keys to the right data.
+2. DM the result to the owner via `agents.notify.dm_owner` — the same self-
+   notification path the reminder sweep uses. Ungated and deterministic: messaging
+   yourself is not an outward act, so no approval gate fires and unattended runs
+   complete end to end.
+
+The playbooks are read-only (they pull and format, they never send), so a
+scheduled digest never trips an act tool. We tell the agent explicitly to return
+the brief as text rather than post it anywhere — delivery is `dm_owner`'s job, not
+the model's.
+"""
+
+from agno.run import RunContext
+from agno.workflow.step import StepInput, StepOutput
+
+from agents.notify import dm_owner
+from app.identity import CANONICAL_OWNER_ID, is_owner
+
+# The playbook prompts. "Return the brief as text, post nothing" keeps the model
+# from reaching for update_slack itself — dm_owner does the delivery.
+_DAILY_PROMPT = (
+    "Run the daily-rundown playbook for me now. Return the brief as text only — "
+    "do not post it to Slack or anywhere else; just give me the rundown."
+)
+_WEEKLY_PROMPT = (
+    "Run the week-plan playbook for me now. Return the plan as text only — do not "
+    "post it to Slack or anywhere else; just give me the week ahead."
+)
+
+
+def _run_playbook(prompt: str) -> str:
+    """Invoke the context agent on `prompt` as the owner and return its text."""
+    # Imported lazily: agents.context imports across the package, so deferring the
+    # import keeps this module cheap to load and avoids any import-order surprise.
+    from agents.context import context
+
+    result = context.run(input=prompt, user_id=CANONICAL_OWNER_ID)
+    content = getattr(result, "content", None)
+    return str(content).strip() if content else ""
+
+
+def _run_digest(prompt: str, label: str, run_context: RunContext) -> StepOutput:
+    """Shared core: gate, run the playbook as owner, DM the result, report."""
+    if not is_owner(run_context):
+        return StepOutput(content=f"The {label} digest is only available to the owner.")
+    if CANONICAL_OWNER_ID is None:
+        return StepOutput(content=f"No owner configured, so there's no one to send the {label} digest to.")
+
+    brief = _run_playbook(prompt)
+    if not brief:
+        return StepOutput(content=f"The {label} digest produced no content; nothing sent.")
+
+    sent = dm_owner(brief)
+    status = "DM'd to the owner" if sent else "generated (Slack DM unavailable, not sent)"
+    return StepOutput(content=f"{label.capitalize()} digest {status}.")
+
+
+def daily_digest_step(step_input: StepInput, run_context: RunContext) -> StepOutput:
+    """The daily rundown, delivered to the owner's Slack DM. Run by the schedule."""
+    return _run_digest(_DAILY_PROMPT, "daily", run_context)
+
+
+def weekly_digest_step(step_input: StepInput, run_context: RunContext) -> StepOutput:
+    """The weekly plan, delivered to the owner's Slack DM. Run by the schedule."""
+    return _run_digest(_WEEKLY_PROMPT, "weekly", run_context)

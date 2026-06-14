@@ -4,7 +4,10 @@ Slack is where @context comes alive. It's the recommended interface for you, you
 
 - Teammates — and their agents — can @-mention it to leave you updates;
 - You can DM it for private conversations.
-- It can DM you for notifications and reminders.
+- It can DM you for notifications, reminders, and scheduled digests (your daily rundown, your weekly plan).
+- It can message on your behalf — post to a channel, DM a teammate, or @-mention another person's @context — through the `update_slack` tool.
+
+The setup below also turns on two things beyond the chat interface: the `update_slack` send tool and the scheduled digests. Both are covered in [What turns on with Slack](#what-turns-on-with-slack).
 
 ## Prerequisites
 
@@ -213,3 +216,15 @@ A few things to note:
 - **Email resolution fails closed.** If the email can't be resolved — scope is missing, or the profile has none — the interface falls back to the raw Slack user ID, which won't match `OWNER_ID`. So a misconfigured owner silently drops to the *guest* surface; it never accidentally promotes a guest.
 - **When it replies.** With the default `reply_to_mentions_only=True`, @context answers every message in a DM but only @-mentions in a channel — so in a channel a teammate @-mentions it each turn, while a DM thread flows without re-mentioning.
 - **One session per thread.** The session id is `context:<thread_ts>`, so each thread carries its own history; a new top-level message starts a fresh one.
+
+## What turns on with Slack
+
+Setting `SLACK_BOT_TOKEN` (plus `SLACK_SIGNING_SECRET` for the inbound interface) lights up three things, all from the same bot token:
+
+1. **The chat interface** — @context answers in Slack (DMs and @-mentions), and teammates and their agents reach it there. Identity is resolved per request (see [How it works](#how-it-works)).
+2. **`update_slack` — the send tool (owner-only, ungated).** The owner can ask @context to post to a channel, reply in a thread, DM a teammate, or @-mention another person's @context. Sending a Slack message is ordinary communication, so it runs without an approval pause — unlike `update_gmail` / `update_calendar`, which stay gated (see [`docs/SECURITY.md`](SECURITY.md) L6). It rides the provider surface, so a *guest* never holds it. The scopes it needs (`chat:write`, `chat:write.public`, `im:write`, `users:read`) are already in the manifest above — no extra setup.
+3. **Scheduled digests — delivered to your DM.** With Slack active, two schedules auto-arm: a daily **rundown** and a weekly **week-plan**, each run as the owner and DM'd to you. They're read-only briefs (no act tool fires), and they DM *you* — self-notification, ungated. Tune the timing with `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC cron; defaults are a weekday-morning rundown and a Sunday-evening plan). The reminder sweep already DMs you the same way the moment a reminder comes due.
+
+### Contexts talking to each other (federation)
+
+Because `update_slack` can @-mention another person's @context, and that context receives the mention through *its own* Slack interface, your team's @context agents talk to each other with no extra infrastructure. When your @context @-mentions `@dana-context`, Dana's deployment sees *your* verified Slack identity as a **guest**, so the message lands in Dana's queue (capture-only) and can't read Dana's data back. The asymmetry holds across the whole network: anyone — including another agent — can write to a context, but only its owner can read it. See [`docs/FEDERATION.md`](FEDERATION.md).

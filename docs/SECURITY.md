@@ -186,10 +186,24 @@ changes the real calendar — so they get a second gate on top of L1:
   sends only on an explicit "send"; the Calendar write sub-agent confirms
   ambiguous targets before touching events.
 
+**Messaging is not an act tool — it's ungated by design.** `update_slack` (post
+to a channel, reply in a thread, DM a teammate, @-mention another person's
+`@context`) is deliberately *not* in `ACT_TOOLS`. Sending a Slack message is
+ordinary communication, not a high-stakes action taken *as* the owner, so it runs
+ungated like any chat reply. It stays **owner-only** the same way every write tool
+does (L1) — a guest never holds it — but it does **not** pause for approval. The
+approval gate is reserved for the genuinely sensitive outward actions: sending
+mail as the owner, mutating the calendar. This ungated messaging is exactly what
+lets contexts talk to each other — see [`docs/FEDERATION.md`](FEDERATION.md). (A
+scheduled **digest** rides a separate, also-ungated path: it DMs the owner
+*themselves* via `agents/notify.py`, which is self-notification, not an outward
+act.)
+
 The asymmetry extends cleanly: *anyone can write **to** your context; only you
-can read it — and nothing acts **as** you without your sign-off.* A scheduled
-run that reaches an act tool pauses too — there's no one to approve
-mid-schedule, so unattended automation can read and file but never send.
+can read it — and nothing **sensitive** acts **as** you without your sign-off.* A
+scheduled run that reaches a gated act tool (mail, calendar) pauses too — there's
+no one to approve mid-schedule, so unattended automation can read, file, and
+message, but never send mail or change the calendar.
 
 ---
 
