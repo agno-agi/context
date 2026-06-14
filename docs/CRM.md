@@ -18,7 +18,7 @@ Owner-only, like the rest of the read surface — a guest never sees these tools
 
 ## The schema
 
-Everything lives in the `context` Postgres schema. The day-one tables, declared
+Everything lives in the `crm` Postgres schema. The day-one tables, declared
 once in [`db/schema.py`](../db/schema.py):
 
 | Table | What it holds | Key columns |
@@ -32,7 +32,7 @@ once in [`db/schema.py`](../db/schema.py):
 Every row also carries `id`, `user_id`, and `created_at`. `tags` is the
 connector that ties an entity together across tables — the same tag can sit on a
 contact, a note, and a reminder. Beyond these, the write side can **create new
-`context.*` tables on demand** when something genuinely isn't a project/meeting/
+`crm.*` tables on demand** when something genuinely isn't a project/meeting/
 reminder/note/contact.
 
 > `db/schema.py` is the single source of truth: editing `TABLES` there updates
@@ -70,7 +70,7 @@ and resolves "next Tuesday" to a concrete date.
 > | Jun 19 | Follow up with Priya Shah at Northwind |
 > | Jun 20 | Follow up with Kyle about partnership |
 >
-> No overdue reminders. *(Source: `context.reminders`.)*
+> No overdue reminders. *(Source: `crm.reminders`.)*
 
 ### Reads are time-aware and sweep wide
 
@@ -100,11 +100,11 @@ The write sub-agent follows a few rules ([`CRM_WRITE`](../agents/instructions.py
 
 ## The write boundary
 
-Writes are confined to the `context` schema by two independent mechanisms in
+Writes are confined to the `crm` schema by two independent mechanisms in
 [`db/session.py`](../db/session.py):
 
 - the **write path** (`get_sql_engine`) sets the `search_path` and runs behind a
-  SQLAlchemy **write-guard**, so a write can't escape the `context` schema;
+  SQLAlchemy **write-guard**, so a write can't escape the `crm` schema;
 - the **read path** (`get_readonly_engine`) runs every query in a Postgres
   **read-only transaction**, so `query_crm` physically cannot mutate anything.
 
@@ -116,7 +116,7 @@ read back across the boundary.
 
 The CRM is an Agno `DatabaseContextProvider` wired in
 [`agents/sources.py`](../agents/sources.py) as `_create_crm_provider()`, pointed
-at the two engines above and handed the `context` schema. Its read and write
+at the two engines above and handed the `crm` schema. Its read and write
 sides run as separate sub-agents on tuned instructions — `CRM_READ` /
 `CRM_WRITE` in [`agents/instructions.py`](../agents/instructions.py), rendered
 table-aware from `db/schema.py`. The main agent only ever sees `query_crm` /

@@ -4,7 +4,7 @@ Database Session
 
 Two SQL engines, split by role:
 
-- `get_sql_engine()` — read/write, scoped to the `context` schema.
+- `get_sql_engine()` — read/write, scoped to the `crm` schema.
   A SQLAlchemy write guard rejects writes against `public` or `ai` (agno's schema).
 - `get_readonly_engine()` — read-only at the Postgres level
   (`default_transaction_read_only=on`); can't be bypassed by prompt tricks.
@@ -24,7 +24,7 @@ from db.url import db_url
 
 @lru_cache(maxsize=1)
 def get_sql_engine() -> Engine:
-    """Read/write engine for the `context` schema."""
+    """Read/write engine for the `crm` schema."""
     bootstrap = create_engine(db_url)
     with bootstrap.begin() as conn:
         conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
@@ -36,13 +36,13 @@ def get_sql_engine() -> Engine:
         pool_size=10,
         max_overflow=20,
     )
-    event.listen(engine, "before_cursor_execute", _guard_non_context_writes)
+    event.listen(engine, "before_cursor_execute", _guard_foreign_schema_writes)
     return engine
 
 
 @lru_cache(maxsize=1)
 def get_readonly_engine() -> Engine:
-    """Read-only engine for the `context` schema."""
+    """Read-only engine for the `crm` schema."""
     return create_engine(
         db_url,
         connect_args={
@@ -60,8 +60,8 @@ def get_postgres_db() -> PostgresDb:
 
 # Write guard for get_sql_engine. A heuristic belt, NOT the primary defense:
 # the real confinement for unqualified writes is the connection's
-# search_path=context,public (so an unqualified CREATE/INSERT lands in
-# `context`). This regex backs that up two ways:
+# search_path=crm,public (so an unqualified CREATE/INSERT lands in
+# `crm`). This regex backs that up two ways:
 #   1. Reject writes explicitly qualified to public.* / ai.* (agno's schema).
 #   2. Reject statements that would *subvert* the search_path confinement —
 #      repointing search_path, switching/altering roles, or GRANT/REVOKE/COPY.
@@ -71,7 +71,7 @@ def get_postgres_db() -> PostgresDb:
 # belt-and-suspenders is a least-privilege DB role with no rights on
 # public/ai — NOT applied here, because the default compose/Railway role owns
 # its database; see docs/SECURITY.md if you tighten this for a shared cluster.
-_NON_CONTEXT_WRITE_RE = re.compile(
+_FOREIGN_SCHEMA_WRITE_RE = re.compile(
     r"""(?ix)
     (?:create|alter|drop)\s+
     (?:or\s+replace\s+)?
@@ -101,9 +101,9 @@ _NON_CONTEXT_WRITE_RE = re.compile(
 )
 
 
-def _guard_non_context_writes(conn, cursor, statement, parameters, context, executemany) -> None:
-    """Reject DDL/DML targeting non-context schemas on the read/write engine."""
-    if _NON_CONTEXT_WRITE_RE.search(statement):
+def _guard_foreign_schema_writes(conn, cursor, statement, parameters, context, executemany) -> None:
+    """Reject DDL/DML targeting foreign schemas (public/ai) on the read/write engine."""
+    if _FOREIGN_SCHEMA_WRITE_RE.search(statement):
         raise RuntimeError(
-            "Cannot write to the public or ai schema from the context engine; writes must target the context schema."
+            "Cannot write to the public or ai schema from the crm engine; writes must target the crm schema."
         )

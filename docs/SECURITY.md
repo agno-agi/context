@@ -106,7 +106,7 @@ advertises the owner surface.
 
 Guests get exactly one context tool: `submit_update`
 ([`agents/inbox.py`](../agents/inbox.py)). No `query_*`, no reads, no briefing.
-It appends to the **owner's** queue (`context.updates`, `user_id = OWNER`,
+It appends to the **owner's** queue (`crm.updates`, `user_id = OWNER`,
 `from_person = <caller>`, `ack_status = 'new'`). This is the single allowed
 cross-user operation, and it's safe because it's **append-only with no
 readback** — a teammate can drop a note in your inbox but can't read your inbox.
@@ -161,7 +161,7 @@ of the toolset:
 
 - `AuthorizationConfig(user_isolation=True)` scopes the OS REST routes
   (sessions / memory / runs) to the verified JWT user.
-- The two-engine split on the `context` schema — a write-guarded engine
+- The two-engine split on the `crm` schema — a write-guarded engine
   (`search_path` + a SQLAlchemy guard rejecting writes to `public`/`ai`) and a
   Postgres-level read-only engine (`default_transaction_read_only=on`). See
   [`db/session.py`](../db/session.py).

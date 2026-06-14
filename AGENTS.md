@@ -17,7 +17,7 @@ Two ideas define it:
 Context  (agents/context.py — one Agno agent, gpt-5.5)
 │
 ├── ContextProviders (agents/sources.py)        each source = query_<id> / update_<id>
-│   ├── crm        DatabaseContextProvider        structured store (context schema)  R/W  always on
+│   ├── crm        DatabaseContextProvider        structured store (crm schema)  R/W  always on
 │   ├── knowledge  WikiContextProvider            knowledge base — specs (FS → Git)  R/W  always on
 │   ├── workspace  WorkspaceContextProvider       this repo's files                  R    always on
 │   ├── web        WebContextProvider             Parallel (SDK or keyless MCP)      R    always on
@@ -39,7 +39,7 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 ```
 
 Shared:
-- PostgreSQL + pgvector for sessions, memory, knowledge, and the `context` schema (the structured store).
+- PostgreSQL + pgvector for sessions, memory, knowledge, and the `crm` schema (the structured store).
 - `app.settings.default_model()` returns `OpenAIResponses(id="gpt-5.5")` — bump the model in one place.
 - Scheduler enabled by default (`scheduler=True`). Scheduled runs arrive with the verified identity `__scheduler__`, which `is_owner` treats as the owner (the scheduler is the owner's automation — see `docs/SECURITY.md`).
 - Slack interface is added automatically when both `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` are set, routed to `context` ([`docs/SLACK.md`](docs/SLACK.md)).
@@ -72,7 +72,7 @@ Shared:
 | [`docs/SLACK.md`](docs/SLACK.md) | Slack setup — app manifest, identity resolution, both sides of the boundary. |
 | [`docs/GOOGLE.md`](docs/GOOGLE.md) | Gmail + Calendar setup — both auth paths, token minting, the act-tool approval flow. |
 | [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) | The `knowledge` base — the folder-per-spec prose store, the read/write split, filesystem vs Git backing (`KNOWLEDGE_*`). |
-| [`docs/CRM.md`](docs/CRM.md) | The `crm` structured store — the `context` schema tables, filing rules, and the write-guard/read-only boundary. |
+| [`docs/CRM.md`](docs/CRM.md) | The `crm` structured store — the `crm` schema tables, filing rules, and the write-guard/read-only boundary. |
 | [`compose.yaml`](compose.yaml) | Docker Compose for local development. |
 | [`railway.json`](railway.json) | Railway deploy config (Docker + 2 replicas + 4Gi/2vCPU). |
 
@@ -137,7 +137,7 @@ Drop a folder in [`skills/`](skills/): `skills/<name>/SKILL.md` with YAML frontm
 
 ### The structured store
 
-Managed tables are declared once in [`db/schema.py`](db/schema.py) `TABLES`. One edit there updates both the `CREATE TABLE` DDL (applied at startup) and the `crm` sub-agents' table-awareness (spliced into their prompts). Day-1 tables: `projects`, `meetings`, `reminders`, `notes`, `contacts`, `updates`. The write sub-agent can also create ad-hoc `context.*` tables on demand. Writes are confined to the `context` schema by two mechanisms: `search_path` + a SQLAlchemy write-guard (`get_sql_engine`), and a Postgres-level read-only transaction on the read path (`get_readonly_engine`).
+Managed tables are declared once in [`db/schema.py`](db/schema.py) `TABLES`. One edit there updates both the `CREATE TABLE` DDL (applied at startup) and the `crm` sub-agents' table-awareness (spliced into their prompts). Day-1 tables: `projects`, `meetings`, `reminders`, `notes`, `contacts`, `updates`. The write sub-agent can also create ad-hoc `crm.*` tables on demand. Writes are confined to the `crm` schema by two mechanisms: `search_path` + a SQLAlchemy write-guard (`get_sql_engine`), and a Postgres-level read-only transaction on the read path (`get_readonly_engine`).
 
 ### The knowledge base
 
@@ -202,7 +202,7 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 
 `scheduler=True` is on in [`app/main.py`](app/main.py), and `register_schedules()` registers schedules on every boot (idempotent). The reminder sweep always; the digests only when Slack is configured:
 
-- **`queue-reminders`** — hourly (on the hour, UTC), the schedule hits the `queue-reminders` workflow (`/workflows/queue-reminders/runs`), whose one step runs `_queue_reminders` ([`agents/reminders.py`](agents/reminders.py)) on the owner surface. It sweeps `context.reminders` for anything now due and drops it into the inbound queue, where the next rundown surfaces it. `notified_at` is stamped (via an atomic claim) so each reminder fires exactly once. It's a workflow, not an agent run, so the sweep fires deterministically — nothing depends on a model choosing to call a tool.
+- **`queue-reminders`** — hourly (on the hour, UTC), the schedule hits the `queue-reminders` workflow (`/workflows/queue-reminders/runs`), whose one step runs `_queue_reminders` ([`agents/reminders.py`](agents/reminders.py)) on the owner surface. It sweeps `crm.reminders` for anything now due and drops it into the inbound queue, where the next rundown surfaces it. `notified_at` is stamped (via an atomic claim) so each reminder fires exactly once. It's a workflow, not an agent run, so the sweep fires deterministically — nothing depends on a model choosing to call a tool.
 - **`daily-digest` / `weekly-digest`** — registered **only when `SLACK_BOT_TOKEN` is set** (delivery is a Slack DM, so there's no point otherwise). Each hits its digest workflow ([`agents/digest.py`](agents/digest.py)), which runs a read-only playbook as the owner (daily rundown, weekly week-plan) and DMs the result via `dm_owner` ([`agents/notify.py`](agents/notify.py)). Read-only, so no act tool fires; the DM is self-notification, so it's ungated and completes unattended. Timing is tunable via `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC; defaults `0 13 * * *` and `0 22 * * 0`).
 
 Hand the scheduler any other agent / workflow + a cron expression to add more. Natural fits for `@context`:

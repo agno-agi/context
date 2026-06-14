@@ -44,7 +44,7 @@ Nothing beyond the standard Slack setup ([SLACK.md](SLACK.md)) on each deploymen
 
 Slack messaging needs a shared Slack surface. The bigger version, where my context calls your context's API directly across orgs with no shared Slack, is deferred. What it would take, noted so we build it on purpose:
 
-- **A directory.** Store each contact's context endpoint (e.g. a `context_url` column on `context.contacts`) so "message Dana's context" resolves to a URL. The contacts table becomes the address book.
+- **A directory.** Store each contact's context endpoint (e.g. a `context_url` column on `crm.contacts`) so "message Dana's context" resolves to a URL. The contacts table becomes the address book.
 - **An outbound tool**, `message_context(contact, message)`, that POSTs to the peer's `/agents/context/runs` with my verified identity as the `user_id`. The peer's guest path files it. Owner-only, like every send tool.
 - **The hard part: auth between contexts.** A production peer runs JWT auth, so an inbound POST needs a token it will verify. That means a shared secret per peer, a token the peer mints for known senders, or a small handshake. Until that's designed, the direct path only works against dev/unauthenticated peers, which isn't shippable.
 - **Abuse surface.** Outbound POSTs to owner-set URLs, rate limits, and a way to block a noisy peer.

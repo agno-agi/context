@@ -16,8 +16,10 @@ from dataclasses import dataclass
 
 from sqlalchemy import text
 
-# Database schema the context tables live in.
-SCHEMA = "context"
+# Database schema the CRM tables live in. Named `crm` to match the provider id
+# (query_crm / update_crm) and how the docs refer to it — the structured store
+# is the CRM. (Distinct from agno's own `ai` schema for sessions/memory.)
+SCHEMA = "crm"
 
 
 @dataclass

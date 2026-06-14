@@ -4,7 +4,7 @@ Queue Reminders
 
 Push due reminders into the owner's inbound queue.
 
-@context saves reminders in `context.reminders`, each with a due date — but
+@context saves reminders in `crm.reminders`, each with a due date — but
 nothing watches that clock. This is the watcher: it finds reminders that are now
 due and surfaces them.
 

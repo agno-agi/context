@@ -71,7 +71,7 @@ def register_schedules() -> None:
 
     - queue-reminders: hourly, the schedule hits the `queue-reminders` workflow
       (`/workflows/queue-reminders/runs`), whose one step calls `_queue_reminders`
-      and sweeps `context.reminders` for anything now due into the inbound queue
+      and sweeps `crm.reminders` for anything now due into the inbound queue
       (see `agents/reminders.py`). It's a workflow, not an agent run, so the
       sweep fires deterministically — no model deciding whether to call a tool.
 
