@@ -52,10 +52,18 @@ def caller_information(run_context: RunContext | None = None) -> str:
     Rendered per run by `context_instructions` (the owner gets the full guide,
     a guest the capture-only one).
     """
+    user_id = getattr(run_context, "user_id", None) or ANON_USER_ID
     if is_owner(run_context):
         skills = _skills.get_system_prompt_snippet() if _skills is not None else ""
-        return OWNER_GUIDE.format(providers=context_providers_summary(), skills=skills)
-    return GUEST_GUIDE.format(owner=owner_display_name("(no owner configured)"))
+        return OWNER_GUIDE.format(
+            owner_name=owner_display_name(),
+            providers=context_providers_summary(),
+            skills=skills,
+        )
+    return GUEST_GUIDE.format(
+        owner_name=owner_display_name("(no owner configured)"),
+        user_id=user_id,
+    )
 
 
 def context_instructions(run_context: RunContext | None = None) -> str:
