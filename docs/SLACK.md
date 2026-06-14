@@ -151,9 +151,25 @@ how are you?
 
 ## Good to do: give it an app icon
 
-Not required but good to do: give your @context an icon.
+Not required, but recommended: give your @context an icon.
 
-In your Slack app config, go to **Basic Information** → **Display Information** → **App icon & Preview** and click **Add App Icon**. Slack wants a square image at least 512×512 px (a PNG works well). The manifest already sets the background to `#000000`, so pick an icon that reads on dark.
+In your Slack app config, go to **Basic Information** → **Display Information** → **App icon & Preview** and click **Add App Icon**. Slack wants a square image at least 512×512 px. A PNG works well.
+
+You can use the prompt below to generate an icon for your own @context app.
+
+```text
+Design a modern app icon for "@context" — a private AI that captures scattered work and files it into one calm, ordered place.
+
+Concept: one glowing core as the single focal point — a softly rounded cube or rounded-square "vault" where everything is kept. A few clean strokes or particles (3–5, no more) curve into it from the edges, hinting at notes, messages, and reminders being drawn into order. Hold one strong silhouette; resist adding more objects.
+
+Palette: near-black background (#000000) with a warm amber-to-orange glow inside the core, and a single cool accent (soft electric blue) on the incoming strokes. Two colors plus the glow — no rainbow.
+
+Style: premium and minimal, the polish of a top-tier macOS/iOS icon — depth from soft gradients and inner light, not from detail. Centered, with generous padding and a bold shape that still reads at 32×32.
+
+Avoid: text, letters, the @ symbol, human faces, robot mascots, the Slack logo, watermarks, photorealism, and busy clutter.
+```
+
+After generating the icon, upload it to Slack. The manifest already sets the app background to `#000000`, so icons with a dark background or strong center glow usually work best.
 
 ## How it works
 
