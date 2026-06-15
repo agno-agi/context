@@ -83,7 +83,7 @@ Shared:
 | [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) | The `knowledge` base — the folder-per-spec prose store, the read/write split, filesystem vs Git backing (`KNOWLEDGE_*`). |
 | [`docs/CRM.md`](docs/CRM.md) | The `crm` structured store — the `crm` schema tables, filing rules, and the write-guard/read-only boundary. |
 | [`compose.yaml`](compose.yaml) | Docker Compose for local development. |
-| [`railway.json`](railway.json) | Railway deploy config (Docker + 1 replica + 4Gi/2vCPU; scale in [`docs/SCALING.md`](docs/SCALING.md)). |
+| [`railway.json`](railway.json) | Railway deploy config (Docker + 2 replicas + 4Gi/2vCPU each, for zero-downtime deploys + fault tolerance; scale in [`docs/SCALING.md`](docs/SCALING.md)). |
 
 ## The owner/guest security model
 
@@ -185,7 +185,7 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 | `CONTEXT_SELF_VERIFICATION_KEY` | no | — | A second JWT public key the app *also* trusts (passed to `AuthorizationConfig.verification_keys` in [`app/main.py`](app/main.py); RS256, multi-issuer) — your own, so a token you self-issue with `scripts/mint_mcp_jwt.py` verifies while the os.agno.com UI keeps working. Server-side; pushed by `env-sync.sh`. |
 | `CONTEXT_MCP_JWT` | no | — | The self-issued bearer token `scripts/connect.py --production` threads into MCP clients (minted by `scripts/mint_mcp_jwt.py`). **Client-side only** — lives in `.env.production`, `env-sync.sh` skips it so the signing-grade token never reaches the server. |
 | `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production so cron triggers reach AgentOS — and so the MCP server's Host allowlist accepts that domain (deploy/tunnel; see [`docs/MCP.md`](docs/MCP.md)). |
-| `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Auto-generated per process; pin it when running more than one replica behind one URL (railway.json ships one by default — see [`docs/SCALING.md`](docs/SCALING.md)). |
+| `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Auto-generated per process — but the deploy ships 2 replicas, which must share one (else triggers signed by one are rejected by the other), so `scripts/railway/up.sh` pins one automatically (override in `.env.production`). See [`docs/SCALING.md`](docs/SCALING.md). |
 | `PARALLEL_API_KEY` | no | — | Switches the `web` provider from the keyless Parallel MCP endpoint to the authenticated Parallel SDK (higher rate ceiling; recommended for production). Get a key at [platform.parallel.ai](https://platform.parallel.ai/settings?tab=api-keys). |
 | `SLACK_BOT_TOKEN` | no | — | Bot token. Activates the `slack` provider on its own (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests; set with the signing secret to enable the Slack interface ([`docs/SLACK.md`](docs/SLACK.md)). |
 | `SLACK_SIGNING_SECRET` | no | — | Signing secret. Both must be set for the interface to load. |
@@ -220,7 +220,7 @@ To add a workflow, drop a module in [`workflows/`](workflows/) (the `Workflow` o
 - **Maintenance** — purge acknowledged updates older than N days; vacuum tables.
 - **Periodic re-evaluation** — run `python -m evals` weekly to catch regressions.
 
-Identity: the scheduler authenticates its run triggers with AgentOS's internal service token, and those runs arrive as the verified `__scheduler__` identity — which [`is_owner`](app/identity.py) honors as the owner (once `OWNER_ID` is set), so scheduled playbooks get the owner surface and key their writes under the canonical id. The gated act tool (calendar) still pauses for approval, so unattended runs can read, draft, file, and message on Slack but never change the calendar. Running >1 replica? Pin `INTERNAL_SERVICE_TOKEN`. See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler) for the cron API.
+Identity: the scheduler authenticates its run triggers with AgentOS's internal service token, and those runs arrive as the verified `__scheduler__` identity — which [`is_owner`](app/identity.py) honors as the owner (once `OWNER_ID` is set), so scheduled playbooks get the owner surface and key their writes under the canonical id. The gated act tool (calendar) still pauses for approval, so unattended runs can read, draft, file, and message on Slack but never change the calendar. The deploy runs 2 replicas, so the scheduler token is shared (`up.sh` pins `INTERNAL_SERVICE_TOKEN`) and each due job is claimed via a row-level lease on `agno_schedules` — so the sweep and digests fire once, not once per replica ([`docs/SCALING.md`](docs/SCALING.md)). See [Agno scheduler docs](https://docs.agno.com/agent-os/scheduler) for the cron API.
 
 ## Slack
 

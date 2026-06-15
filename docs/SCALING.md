@@ -1,40 +1,61 @@
 # Scaling @context
 
-@context is a personal alter-ego — one person's context, one running instance.
-So it ships on **a single replica** (`numReplicas: 1` in
-[`railway.json`](../railway.json)), which is plenty: a single container handles
-your traffic, the hourly reminder sweep, and scheduled playbooks without
-breaking a sweat. You don't need to think about this unless you're deliberately
-running it for heavier or shared use.
+@context is a personal alter-ego — one person's context, one logical instance
+backed by one shared Postgres. But "one instance" isn't "one container": it
+ships on **two replicas** (`numReplicas: 2` in [`railway.json`](../railway.json),
+4Gi / 2 vCPU each), which is Agno's default Railway footprint. Two replicas buy
+two things a single container can't:
 
-## Running more than one replica
+- **Zero-downtime rolling deploys** — one replica keeps serving while the other
+  restarts on a new build.
+- **Basic fault tolerance** — if one falls over, the other carries the traffic.
 
-If you do scale out (bump `numReplicas`, or run several instances behind one
-domain), two things matter:
+For a service you talk to all day and that runs scheduled work in the
+background, that redundancy is the right default — it's about staying up, not
+horizontal scale for load. Both replicas share one Postgres (sessions, memory,
+the structured store, the queue), so they're interchangeable: any replica can
+serve any request, and the data layer needs nothing special.
 
-- **Pin `INTERNAL_SERVICE_TOKEN`.** The scheduler authenticates its run
-  triggers to AgentOS with this token. It's auto-generated per process, so with
-  more than one replica each would generate a different one and the triggers
-  wouldn't line up. Set a fixed value in `.env.production` and sync it so every
-  replica shares it. (Already noted next to the scheduler in
-  [`AGENTS.md`](../AGENTS.md).)
+## What multiple replicas need — both already handled
 
-- **The Gmail/Calendar token rides every replica fine.** Each replica decodes
-  the same `GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64` env var to its own
-  local token file at boot (see [`docs/GOOGLE.md`](GOOGLE.md)). They each refresh
-  independently using the shared refresh token, which is stable and safe to use
-  from several instances at once — no coordination or shared volume needed. The
-  short-lived access token a replica refreshes to is local and disposable; the
-  durable part comes back from the env var on every restart.
+- **A shared `INTERNAL_SERVICE_TOKEN`.** The scheduler authenticates its run
+  triggers to AgentOS with this token. It's auto-generated per process, so if
+  each replica minted its own, a trigger signed by one would be rejected by the
+  other (~half the time). [`scripts/railway/up.sh`](../scripts/railway/up.sh)
+  pins one value at provision time and forwards it to the service, so every
+  replica shares it — set your own in `.env.production` to override.
 
-Postgres (sessions, memory, the structured store, the queue) is already shared,
-so the data layer needs nothing special — the reminder sweep claims each due
-reminder atomically, so even concurrent sweeps fire each one exactly once.
+- **An HA-safe scheduler.** Every replica runs the scheduler loop, but each due
+  job is claimed via a row-level lease on `agno_schedules`: the first replica to
+  claim it runs it, the others skip. So the hourly reminder sweep and the
+  daily/weekly digests fire **once**, not once per replica. (Belt and braces:
+  the reminder sweep also claims each reminder atomically, so even concurrent
+  sweeps would surface each one exactly once.)
 
-## When you might actually want to
+The Gmail/Calendar token rides every replica fine, too: each decodes the same
+`GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64` env var to its own local
+token file at boot (see [`docs/GOOGLE.md`](GOOGLE.md)) and refreshes
+independently using the shared, stable refresh token — no coordination or
+shared volume needed.
 
-The honest answer for a personal alter-ego is "rarely." Reach for more than one
-replica if you're putting @context in front of a whole team on Slack and want
-headroom/redundancy, or you're running heavy scheduled work alongside live
-traffic. For one person, one replica is the right default — scale up only when
-you can point at the load that needs it.
+## Running more (or fewer)
+
+Bump `numReplicas` and `limits` in [`railway.json`](../railway.json) as usage
+grows — say, putting @context in front of a whole team on Slack, or running
+heavy scheduled work alongside live traffic. Everything above still holds at
+three or four replicas; there's nothing new to configure.
+
+You *can* drop to `numReplicas: 1` to halve the cost if you don't need
+zero-downtime deploys — a single container handles one person's traffic, the
+hourly sweep, and scheduled playbooks without breaking a sweat. The token and
+scheduler arrangements above are harmless at one replica, so it's a pure config
+change.
+
+## Capacity vs. redundancy
+
+Replicas give you redundancy; they don't raise the ceiling for a single request.
+Each replica still has the same 4Gi / 2 vCPU limit, so if one is being
+OOM-killed or crash-looping, adding replicas won't fix it — raise
+`limits.memory` / `limits.cpu` in [`railway.json`](../railway.json) (or fix the
+underlying spike) instead. `railway logs --service agent-os` shows the restart
+reason.
