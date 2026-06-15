@@ -90,13 +90,15 @@ Notes:
 - Agno's AgentOS automatically sets up the Slack interface when the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` env vars are set.
 - The `resolve_user_identity=True` flag tells the AgentOS to resolve the Slack user identity to an email, which is what `OWNER_ID` matches against to determine the caller's role (owner or guest).
 
-## Use from Claude or ChatGPT (MCP)
+## MCP server
 
-@context is an MCP server, always on, with two tools — `ask_context` (read/act) and `update_context` (file/update). The big one: the **Claude and ChatGPT desktop apps reach it on localhost with zero setup** — no Slack app, no bot tokens, no tunnel. Bring @context up (`docker compose up -d`) and add a connector pointing at `http://localhost:8000/mcp`; the desktop app learns what your context is and uses it on its own, so you often don't even have to ask for it by name.
+@context ships a two-tool MCP server — `ask_context` (read/act) and `update_context` (file/update) — so you can use it from any MCP client.
 
-Cloud clients (ChatGPT on the web, Claude on the web) run remotely and can't reach your laptop — for those, deploy and use `https://<your-domain>/mcp` with `Authorization: Bearer <JWT>` (the os.agno.com-minted token), or tunnel with ngrok. Same two paths as Slack.
+Desktop apps (Claude, ChatGPT) and CLI clients (Claude Code, Codex) reach it on localhost with zero setup — point them at `http://localhost:8000/mcp`. The client picks up both tools and uses them on its own; you don't have to call @context by name.
 
-This is *your* channel — it runs the agent as the owner, so it's owner-only and fail-closed (a non-owner gets a 401, never the guest surface). Teammates don't use this; they keep their Slack write path. Full setup and the connector steps are in [`docs/MCP.md`](docs/MCP.md).
+Cloud clients can't reach localhost — use an ngrok tunnel or a deployed instance: `https://<domain>/mcp` with `Authorization: Bearer <JWT>`. Same two paths as Slack.
+
+It runs as you, the owner, so it's owner-only and fail-closed. More in [docs/MCP.md](docs/MCP.md).
 
 ## @context Knowledge Base
 
@@ -213,7 +215,7 @@ See [`docs/SLACK.md`](docs/SLACK.md#moving-from-local-to-production) for full st
 
 ### The app (`app/`)
 
-@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the always-on owner-only MCP channel — a two-tool server (`ask_context` / `update_context`) that lets you read, act, and file through @context from the Claude/ChatGPT desktop apps (see below).
+@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the always-on owner-only MCP server — two tools (`ask_context` / `update_context`) that let you read, act, and file through @context from the Claude/ChatGPT desktop apps and CLI clients (see below).
 
 ### The agents (`agents/`)
 

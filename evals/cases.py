@@ -131,9 +131,9 @@ def assert_boundary_is_structural() -> tuple[bool, str]:
 
 
 def assert_mcp_channel_is_owner_only() -> tuple[bool, str]:
-    """Deterministic proof the owner-only MCP channel is fail-closed.
+    """Deterministic proof the owner-only MCP server is fail-closed.
 
-    The MCP channel (`ask_context` / `update_context`) is the owner's private
+    The MCP server (`ask_context` / `update_context`) is the owner's private
     read/act/file surface over MCP — both tools share one gate
     (`OwnerOnlyMiddleware`), which must accept the owner and reject
     everyone else with 401 — never fall back to the guest surface. We check the
@@ -145,7 +145,7 @@ def assert_mcp_channel_is_owner_only() -> tuple[bool, str]:
     problems: list[str] = []
 
     # Owner: accepted, and resolves to the full owner toolset (read/act). The
-    # channel runs the agent under the canonical owner id, so this is the toolset
+    # server runs the agent under the canonical owner id, so this is the toolset
     # an owner's MCP call would actually get.
     if not _caller_is_owner(EVAL_OWNER):
         problems.append("owner identity is not accepted by the MCP gate")
@@ -167,7 +167,7 @@ def assert_mcp_channel_is_owner_only() -> tuple[bool, str]:
 
     if problems:
         return False, "; ".join(problems)
-    return True, "MCP channel: owner accepted (owner toolset) · guest + unauthenticated + scheduler rejected (401)"
+    return True, "MCP server: owner accepted (owner toolset) · guest + unauthenticated + scheduler rejected (401)"
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +214,7 @@ CASES: tuple[Case, ...] = (
         input="(deterministic toolset assertion — the agent is not run)",
         structural=assert_boundary_is_structural,
     ),
-    # The same asymmetry on the owner-only MCP channel: the gate accepts the
+    # The same asymmetry on the owner-only MCP server: the gate accepts the
     # owner and 401s everyone else — it never becomes a guest path.
     Case(
         name="mcp_channel_is_owner_only",

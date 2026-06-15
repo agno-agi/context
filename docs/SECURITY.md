@@ -22,7 +22,7 @@ deploy: their database, their knowledge base, their keys.
 | The owner's stored context (CRM, knowledge base, queue) | Any guest caller reading it | Identity-conditioned toolset — guests get no read tools |
 | The ack axis (what's "handled") | Anyone but the owner marking items done/acknowledged | Only the owner's toolset has the ack tool |
 | Acting *as* the owner (changing the calendar) | The model doing it unprompted; guests triggering it | Owner-only act tool + a per-call approval gate — the run pauses until the owner confirms (L6). Email is draft-only, so @context never sends. |
-| Reading / acting / filing through the MCP channel | Any non-owner reaching the `/mcp` connector | Owner-only, fail-closed gate — JWT then an owner check that 401s everyone else; DNS-rebinding protection on (L7) |
+| Reading / acting / filing through the MCP server | Any non-owner reaching the `/mcp` connector | Owner-only, fail-closed gate — JWT then an owner check that 401s everyone else; DNS-rebinding protection on (L7) |
 | Identity itself | A caller or the model forging "I am the owner" | Trusted identity from verified JWT / Slack HMAC, not the request body |
 | Data at rest | Cross-user reads via the OS REST API | `user_isolation` + `user_id`-scoped engines |
 
@@ -210,9 +210,9 @@ and message, but never change the calendar. (To let @context send email for you,
 re-enable the send tools and add `update_gmail` to `ACT_TOOLS` so sends are
 approval-gated like the calendar — see [`docs/GOOGLE.md`](GOOGLE.md).)
 
-### L7 — The MCP channel is owner-only, fail-closed
+### L7 — The MCP server is owner-only, fail-closed
 
-The MCP channel ([`app/mcp.py`](../app/mcp.py), [`docs/MCP.md`](MCP.md)) is
+The MCP server ([`app/mcp.py`](../app/mcp.py), [`docs/MCP.md`](MCP.md)) is
 **always on** and exposes two tools, `ask_context` (read / act) and
 `update_context` (file / update), so the owner can drive `@context` from MCP
 clients — the Claude / ChatGPT desktop apps reach it on localhost with no setup.
@@ -225,14 +225,14 @@ the owner, and fail closed.
 It's the **same "structural, not a prompt rule" pattern**, applied to a network
 endpoint — the gate is in code, before the model runs:
 
-- **JWT first (prod).** The channel reuses the *same* `authorization_config`
+- **JWT first (prod).** The server reuses the *same* `authorization_config`
   AgentOS uses for the REST API (passed in from [`app/main.py`](../app/main.py)),
   so the verified `sub` arrives identically — non-forgeable.
 - **Owner check, then 401.** `OwnerOnlyMiddleware` resolves the caller and
   rejects anyone who is not in `OWNER_ID` with **401** — it never falls back to
   the capture-only guest surface. An unauthenticated call, a valid non-owner
   token, and the `__scheduler__` sentinel are all rejected (the human read/act
-  channel is stricter than `is_owner` — the scheduler never calls it). With no
+  path is stricter than `is_owner` — the scheduler never calls it). With no
   owner configured the gate 401s everyone.
 - **Owner identity threaded through.** On success both tools run
   `context.arun(…, user_id=<canonical owner>)`, so `is_owner` is true and
@@ -246,13 +246,11 @@ endpoint — the gate is in code, before the model runs:
   config) plus the host from `AGENTOS_URL` (so a deploy / tunnel works). Any other
   Host is rejected with 421 before the gate even runs.
 
-We deliberately **don't** use AgentOS's built-in `enable_mcp_server`: it ships
-unscopeable session/memory CRUD tools, and its `run_agent` drops `user_id` — a
-call through it would resolve to the *guest* surface. So we mount our own
-two-tool server that keeps the identity. In dev (no JWT) the gate binds to the
-canonical `OWNER_ID`, the same keyless-local-as-owner shortcut used elsewhere —
-dev-only. The deterministic eval `mcp_channel_is_owner_only` proves the gate
-accepts the owner and 401s everyone else, no model in the loop.
+We run our own server (not AgentOS's `enable_mcp_server`) so identity is
+threaded through. In dev (no JWT) the gate binds to the canonical `OWNER_ID`, the
+same keyless-local-as-owner shortcut used elsewhere — dev-only. The deterministic
+eval `mcp_channel_is_owner_only` proves the gate accepts the owner and 401s
+everyone else, no model in the loop.
 
 ---
 

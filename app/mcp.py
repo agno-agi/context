@@ -1,51 +1,19 @@
 """
-Owner-only MCP channel
+Context MCP server
 ======================
 
-@context's read/write surface over the Model Context Protocol, so the owner can
-talk to it from MCP clients. The **desktop apps** (Claude Desktop, ChatGPT
-desktop) reach it on localhost with no tunnel and no setup; cloud clients reach a
-deployed instance (see [`docs/MCP.md`](../docs/MCP.md)). This is the
-lowest-friction way in — no Slack app, no bot tokens — and the client learns
-about @context and uses it without the owner having to prompt it.
+@context comes with a two-tool MCP server (`ask_context` / `update_context`)
+which allows the owner to interact with it via MCP clients like Claude and ChatGPT.
 
-Two tools, both running the *real* ``context`` agent
-([`agents/context.py`](context.py)) as the **owner**:
+Desktop Apps like claude and chatGPT and CLI clients like claude code and codex
+can reach it on localhost with 0 setup.
 
-- ``ask_context(message, session_id?)`` — read from / act through your context
-  (the CRM, knowledge base, workspace, web, and — when configured — Slack, Gmail,
-  Calendar).
-- ``update_context(message, session_id?)`` — file into / update your context
-  (leave an update, save a contact / note / decision, set a reminder, record what
-  happened).
+Cloud clients can reach an ngrok tunnel or a deployed instance (see docs/MCP.md).
 
-Both reuse the same identity-conditioned toolset the rest of the product is built
-on, reached over a different transport — nothing re-implemented. They differ only
-in the description that tells the client *when* to call them; the owner agent
-decides what to actually do.
+The @context mcp server exposes two tools:
 
-**Always on, owner-only, fail-closed.** The channel mounts unconditionally — it's
-not a setting the owner opts into. It is *not* a guest path: guests keep their
-Slack ``submit_update`` write path and never reach this endpoint. Two gates
-enforce that in code, before the model runs:
-
-- In production (``RUNTIME_ENV == "prd"``) the *same* JWT middleware AgentOS uses
-  validates the token and puts the verified ``sub`` on ``request.state.user_id``.
-- ``OwnerOnlyMiddleware`` then resolves the caller and **401s anyone who is not
-  the owner** — it never silently falls back to the capture-only guest surface.
-
-In dev (no JWT) the gate binds to the canonical owner id — the same
-keyless-local-as-owner convenience compose uses. Dev-only; prod always carries a
-verified identity. Because an always-on local MCP server is a real DNS-rebinding
-target, host/origin validation is on, anchored on localhost (so the desktop case
-needs zero config) plus the deploy/tunnel host from ``AGENTOS_URL``.
-
-Why not AgentOS's built-in ``enable_mcp_server``: it ships ~19 fixed, unscopeable
-tools (run_agent + full session/memory CRUD), and its ``run_agent`` drops
-identity (no ``user_id``), so a call would land on the capture-only guest surface
-— the opposite of what we want. So we build our own server that threads the owner
-identity through. See [`docs/MCP.md`](../docs/MCP.md) and
-[`docs/SECURITY.md`](../docs/SECURITY.md).
+- `ask_context(message, session_id?)`
+- `update_context(message, session_id?)`
 """
 
 from collections.abc import Awaitable, Callable
@@ -82,7 +50,7 @@ UPDATE_CONTEXT_DESCRIPTION = (
     "Add to or update the owner's @context — file something worth remembering or "
     "acting on. Use to leave an update, save a contact, note, or decision, set a "
     "reminder, or record what happened. Examples: 'met Sarah from Acme, follow "
-    "up Friday', 'we decided to ship the MCP channel first', 'remind me to review "
+    "up Friday', 'we decided to ship the MCP server first', 'remind me to review "
     "the deck tomorrow'. Pass a natural-language statement (not a question). "
     "Optionally pass session_id to continue an earlier thread. Owner-only."
 )
@@ -109,7 +77,7 @@ def _caller_is_owner(user_id: str | None) -> bool:
 
     Stricter than ``app.identity.is_owner``: it does *not* honour the
     ``__scheduler__`` sentinel — the scheduler never calls this endpoint, and
-    keeping the human read/act channel to real owner identities is one fewer
+    keeping the human read/act surface to real owner identities is one fewer
     thing to reason about.
     """
     if not user_id:
@@ -158,7 +126,7 @@ class OwnerOnlyMiddleware(BaseHTTPMiddleware):
         caller = _resolve_caller_id(request)
         if not _caller_is_owner(caller):
             return JSONResponse(
-                {"error": "unauthorized", "detail": "The @context MCP channel is owner-only."},
+                {"error": "unauthorized", "detail": "The @context MCP server is owner-only."},
                 status_code=401,
             )
         request.state.context_owner_id = caller
@@ -176,7 +144,7 @@ async def _run_as_owner(ctx: Context, message: str, session_id: str | None) -> s
     # Defense in depth — the middleware already 401s non-owners. If we ever
     # reached here without an owner, refuse rather than run as anyone.
     if not _caller_is_owner(caller):
-        raise ValueError("The @context MCP channel is owner-only.")
+        raise ValueError("The @context MCP server is owner-only.")
     # Key under the canonical id — matches normalize_identity and keeps sessions /
     # storage from fragmenting across the owner's identities.
     result = await context.arun(input=message, user_id=CANONICAL_OWNER_ID, session_id=session_id)
@@ -234,7 +202,7 @@ def build_context_mcp_app(
         # No JWT layer in prd means the dev shortcut is the only thing standing
         # in for auth — which would reject every call (no verified identity).
         log_warning(
-            "Context MCP channel mounted in prd without JWT authorization — the owner gate will "
+            "Context MCP server mounted in prd without JWT authorization — the owner gate will "
             "reject every call. Configure authorization (RUNTIME_ENV=prd implies it)."
         )
     return mcp_app

@@ -34,7 +34,7 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │
 ├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today
 │
-├── MCP channel (app/mcp.py)                    always-on owner-only `ask_context` + `update_context` at /mcp — read/act/file via Claude/ChatGPT desktop
+├── MCP server (app/mcp.py)                     always-on owner-only `ask_context` + `update_context` at /mcp — read/act/file via Claude/ChatGPT desktop + CLI
 │
 └── Owner policy (agents/policy.py + app/identity.py)
     identity-conditioned toolset, pre-hook, tool-hook — all from a verified id
@@ -46,7 +46,7 @@ Shared:
 - Scheduler enabled by default (`scheduler=True`). Scheduled runs arrive with the verified identity `__scheduler__`, which `is_owner` treats as the owner (the scheduler is the owner's automation — see `docs/SECURITY.md`).
 - Slack interface is added automatically when both `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` are set, routed to `context` ([`docs/SLACK.md`](docs/SLACK.md)).
 - JWT auth on whenever `RUNTIME_ENV == "prd"`, with `user_isolation=True` (so production deploys are gated by default).
-- Owner-only MCP channel (`ask_context` + `update_context` at `/mcp`) is **always on** — the owner's read/act/file surface for the Claude/ChatGPT desktop apps (localhost, zero setup), fail-closed (not a guest path). We build our own server, so AgentOS's `enable_mcp_server` stays off ([`docs/MCP.md`](docs/MCP.md)).
+- Owner-only MCP server (`ask_context` + `update_context` at `/mcp`) is **always on** — the owner's read/act/file surface for the Claude/ChatGPT desktop apps and CLI clients (localhost, zero setup), fail-closed (not a guest path). See [`docs/MCP.md`](docs/MCP.md).
 
 ## Key Files
 
@@ -54,7 +54,7 @@ Shared:
 |------|---------|
 | [`app/main.py`](app/main.py) | AgentOS entrypoint — lifespan (create tables + setup/close providers), conditional Slack, JWT gate, `OWNER_ID` warning, conditional owner-only MCP mount. |
 | [`app/identity.py`](app/identity.py) | `OWNER_ID` parsing + `is_owner(run_context)` — the verdict the whole owner/guest model keys off. Fails closed. |
-| [`app/mcp.py`](app/mcp.py) | The always-on owner-only MCP channel — a two-tool (`ask_context` / `update_context`) FastMCP server that runs the `context` agent as the owner; fail-closed `OwnerOnlyMiddleware` (JWT then owner check → 401) + DNS-rebinding protection, so it's never a guest path ([`docs/MCP.md`](docs/MCP.md)). |
+| [`app/mcp.py`](app/mcp.py) | The always-on owner-only MCP server — two tools (`ask_context` / `update_context`) running the `context` agent as the owner; fail-closed `OwnerOnlyMiddleware` (JWT then owner check → 401) + DNS-rebinding protection, so it's never a guest path ([`docs/MCP.md`](docs/MCP.md)). |
 | [`app/settings.py`](app/settings.py) | `default_model()` factory. |
 | [`app/config.yaml`](app/config.yaml) | Quick prompts for the `context` agent. |
 | [`agents/context.py`](agents/context.py) | The `context` Agent — identity-conditioned `tools=` callable, identity-resolved prompt (`caller_information`), defense-in-depth hooks, owner-gated skills. |
@@ -227,11 +227,11 @@ Set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` and mint the consent tokens once
 
 Token caches live at `gmail_token.json` / `calendar_token.json` (override with `GMAIL_TOKEN_FILE` / `CALENDAR_TOKEN_FILE`; resolved in one place by `gmail_token_path()` / `calendar_token_path()` in [`agents/sources.py`](agents/sources.py)). On Railway, ship the tokens as base64 (`GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64`) and the [entrypoint](scripts/entrypoint.sh) restores them at startup. Full setup (including how to stop the tokens expiring), the draft-only design, and troubleshooting live in [`docs/GOOGLE.md`](docs/GOOGLE.md); the act-tool design is in [`docs/SECURITY.md`](docs/SECURITY.md) (L6).
 
-## MCP (owner-only read/act/file channel)
+## MCP (owner-only read/act/file server)
 
-The MCP channel is **always on** — [`app/main.py`](app/main.py) mounts it at `/mcp` unconditionally (it's not a setting to opt into). It exposes two tools, `ask_context(message, session_id?)` (read / act) and `update_context(message, session_id?)` (file / update), both running the *real* `context` agent ([`app/mcp.py`](app/mcp.py)) as the **owner**. The point is the lowest-friction way in: the **Claude / ChatGPT desktop apps reach it on localhost with zero setup** (`http://localhost:8000/mcp`, no token in dev), and the client learns about @context and uses it without the owner prompting. Cloud clients (ChatGPT web, Claude web) can't reach localhost — deploy (connector URL `https://<your-domain>/mcp` + `Authorization: Bearer <JWT>`) or tunnel with ngrok, the same paths as Slack.
+The MCP server is **always on** — [`app/main.py`](app/main.py) mounts it at `/mcp` unconditionally (it's not a setting to opt into). It exposes two tools, `ask_context(message, session_id?)` (read / act) and `update_context(message, session_id?)` (file / update), both running the *real* `context` agent ([`app/mcp.py`](app/mcp.py)) as the **owner**. The point is the lowest-friction way in: the **Claude / ChatGPT desktop apps and CLI clients (Claude Code, Codex) reach it on localhost with zero setup** (`http://localhost:8000/mcp`, no token in dev), and the client learns about @context and uses it without the owner prompting. Cloud clients (ChatGPT web, Claude web) can't reach localhost — deploy (connector URL `https://<your-domain>/mcp` + `Authorization: Bearer <JWT>`) or tunnel with ngrok, the same paths as Slack.
 
-It's the owner's private channel — **not** a guest path; teammates keep their Slack write path. Owner-only and fail-closed (see [`docs/SECURITY.md`](docs/SECURITY.md) L7): in prod the same JWT middleware AgentOS uses validates the token, then `OwnerOnlyMiddleware` 401s anyone not in `OWNER_ID` — it never falls back to the guest surface; an always-on local server is a DNS-rebinding target, so host validation is on (anchored on localhost + the `AGENTOS_URL` host). We deliberately **don't** use AgentOS's built-in `enable_mcp_server` (kept off): it ships unscopeable session/memory CRUD tools and its `run_agent` drops `user_id`, so a call through it would land on the capture-only guest surface. Full setup and the Claude/ChatGPT connector steps are in [`docs/MCP.md`](docs/MCP.md).
+It's owner-only — **not** a guest path; teammates keep their Slack write path. Owner-only and fail-closed (see [`docs/SECURITY.md`](docs/SECURITY.md) L7): in prod the same JWT middleware AgentOS uses validates the token, then `OwnerOnlyMiddleware` 401s anyone not in `OWNER_ID` — it never falls back to the guest surface; an always-on local server is a DNS-rebinding target, so host validation is on (anchored on localhost + the `AGENTOS_URL` host). We run our own server (not AgentOS's `enable_mcp_server`) so identity is threaded through. Full setup and the Claude/ChatGPT connector steps are in [`docs/MCP.md`](docs/MCP.md).
 
 ## Deploying to Railway
 

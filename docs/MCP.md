@@ -1,15 +1,16 @@
-# The MCP channel
+# Context MCP server
 
-`@context` exposes itself as an **MCP server** so you can read, act, and file
-through your context straight from your MCP client. The headline: the **Claude
-and ChatGPT desktop apps reach it on localhost with zero setup** — no Slack app,
-no bot tokens, no tunnel. The client learns what `@context` is and uses it on its
-own, so you often don't even have to ask for it by name.
+`@context` exposes itself as an **MCP server** so you can use context from your favorite MCP clients like Claude and ChatGPT.
 
-It's **always on** — not a setting you opt into — and **owner-only, fail-closed**:
-it runs the agent as *you*, so only you can reach it. Teammates keep their write
-path (Slack `submit_update` / the context network — see [`NETWORK.md`](NETWORK.md));
-they never touch this endpoint.
+Desktop apps can reach it on localhost with zero setup.
+CLI clients like claude code and codex can reach it on localhost with zero setup.
+Cloud clients can reach an ngrok tunnel or a deployed instance.
+
+The client automatically learns what `@context` is and uses it on its own, so you often don't even have to ask for it by name.
+
+It's **always on** — not a setting you opt into — and **owner-only**:
+
+It runs the agent as *you*, so remember to never expose this server without security.
 
 ## The two tools
 
@@ -30,7 +31,7 @@ The desktop apps run on your machine, so they can reach `http://localhost:8000/m
 directly. Bring `@context` up locally (`docker compose up -d`) and add a connector:
 
 - **URL**: `http://localhost:8000/mcp`
-- **Auth**: none locally (dev runs without JWT; the channel binds to you as the
+- **Auth**: none locally (dev runs without JWT; the server binds to you as the
   owner — the same keyless-local-as-owner shortcut the rest of dev uses).
 
 Claude Desktop / ChatGPT desktop will list `ask_context` and `update_context`.
@@ -47,7 +48,7 @@ Cloud clients need a public HTTPS URL. Two ways, the same two we use for Slack:
 **Deploy it (recommended).** Deploy `@context` (see the Railway steps in the
 [README](../README.md)) and you get a public domain. The MCP endpoint is
 `https://<your-domain>/mcp`. In production `RUNTIME_ENV=prd` turns JWT on, so the
-channel is properly owner-gated. Add the connector with:
+server is properly owner-gated. Add the connector with:
 
 - **URL**: `https://<your-domain>/mcp`
 - **Auth header**: `Authorization: Bearer <JWT>` — the token os.agno.com mints
@@ -57,7 +58,7 @@ channel is properly owner-gated. Add the connector with:
 
 ```bash
 ngrok http 8000
-# Point AGENTOS_URL at the tunnel domain so the channel accepts that Host
+# Point AGENTOS_URL at the tunnel domain so the server accepts that Host
 # (DNS-rebinding protection — see below), then use https://<id>.ngrok.app/mcp
 ```
 
@@ -91,15 +92,6 @@ path is the easier one today.
   completion. The one approval-gated act tool — `update_calendar` — still pauses
   for approval, and there's no approval affordance over MCP, so the tool returns
   a note telling you to approve it in the AgentOS chat UI and ask it to continue.
-
-## Why not AgentOS's built-in MCP server
-
-AgentOS ships `enable_mcp_server=True`, kept **off** here. It registers ~19 fixed,
-unscopeable tools (`run_agent` + full session/memory CRUD), and its `run_agent`
-drops identity (no `user_id`) — a call through it would resolve to the
-capture-only guest surface, the opposite of what this channel is for. Ours is a
-small server that threads the owner identity through and exposes exactly the two
-tools above.
 
 ## Verifying locally
 

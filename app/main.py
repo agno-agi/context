@@ -189,7 +189,7 @@ async def lifespan(app):  # type: ignore[no-untyped-def]
 # ---------------------------------------------------------------------------
 # User isolation scopes the OS REST endpoints (sessions / memory / runs) to the
 # verified JWT user. Only takes effect when authorization is on (prod). The
-# owner-only MCP channel reuses this same config for its JWT layer.
+# owner-only MCP server reuses this same config for its JWT layer.
 authorization_config = AuthorizationConfig(user_isolation=True)
 
 agent_os = AgentOS(
@@ -211,11 +211,10 @@ app = agent_os.get_app()
 
 
 # ---------------------------------------------------------------------------
-# Owner-only MCP channel
+# Owner-only MCP server
 #
 # @context comes with a two-tool MCP server (`ask_context` / `update_context`)
-# that runs context as the OWNER. This MCP server allows the owner to read and act
-# through their context from MCP clients like Claude and ChatGPT.
+# which allows the owner to read and act from MCP clients like Claude and ChatGPT.
 # ---------------------------------------------------------------------------
 mcp_app = build_context_mcp_app(authorization=is_prd(), authorization_config=authorization_config)
 
@@ -232,10 +231,9 @@ async def _lifespan_with_mcp(app):  # type: ignore[no-untyped-def]
 
 app.router.lifespan_context = _lifespan_with_mcp
 
-# Mounted at root so the public path is exactly MCP_PATH (/mcp). The sub-app's routes live under /mcp,
-# and as the last-registered route the mount catches only what nothing else did.
+# Mounted at root so the public path is exactly MCP_PATH (/mcp).
 app.mount("/", mcp_app)
-log_info(f"@context: owner-only MCP channel mounted at {MCP_PATH}")
+log_info(f"@context: owner-only MCP server mounted at {MCP_PATH}")
 
 
 if __name__ == "__main__":
