@@ -33,6 +33,26 @@ WORK_STATUSES = ("done", "in_progress", "blocked")
 # ---------------------------------------------------------------------------
 
 
+def require_owner(run_context: RunContext | None, action: str) -> None:
+    """Raise unless this run is the owner. The toolset already withholds the
+    owner-only tools from guests; this is a cheap defense-in-depth check per call."""
+    if not is_owner(run_context):
+        raise StopAgentRun(f"{action} is only available to the owner.")
+
+
+def _insert_update(values: dict[str, object]) -> None:
+    """Insert one row into the inbound queue, columns built from `values`' keys.
+
+    Building the column list from the dict lets an omitted optional (e.g. empty
+    tags) fall back to its column DEFAULT instead of binding an untyped empty array.
+    """
+    columns = ", ".join(values)
+    params = ", ".join(f":{name}" for name in values)
+    stmt = text(f"INSERT INTO {_UPDATES} ({columns}) VALUES ({params})")
+    with get_sql_engine().begin() as conn:
+        conn.execute(stmt, values)
+
+
 def _derive_source(run_context: RunContext | None) -> str:
     """Best-effort channel label. The Slack interface stamps the author's
     display name into metadata; HTTP runs don't."""
@@ -126,8 +146,6 @@ def submit_update(
         work_status = "done"
 
     from_person = getattr(run_context, "user_id", None) or "unknown"
-    # Columns built dynamically so empty tags fall back to the column DEFAULT
-    # rather than binding an untyped empty array.
     values: dict[str, object] = {
         "title": title,
         "body": body,
@@ -139,14 +157,7 @@ def submit_update(
     }
     if tags:
         values["tags"] = tags
-
-    columns = ", ".join(values)
-    params = ", ".join(f":{name}" for name in values)
-    stmt = text(f"INSERT INTO {_UPDATES} ({columns}) VALUES ({params})")
-
-    engine = get_sql_engine()
-    with engine.begin() as conn:
-        conn.execute(stmt, values)
+    _insert_update(values)
 
     # No id in the reply: a guest holds no tool that accepts one, and a
     # sequence number leaks queue volume.
@@ -161,8 +172,7 @@ def rundown(run_context: RunContext) -> str:
     (they need the owner), then done work awaiting acknowledgement, then
     in-progress FYIs — and marks the items shown as briefed. Owner-only.
     """
-    if not is_owner(run_context):
-        raise StopAgentRun("The rundown is only available to the owner.")
+    require_owner(run_context, "The rundown")
 
     engine = get_sql_engine()
     with engine.begin() as conn:
@@ -204,8 +214,7 @@ def acknowledge(run_context: RunContext, update_ids: list[int]) -> str:
     Args:
         update_ids: The ids of the updates to acknowledge (from the rundown).
     """
-    if not is_owner(run_context):
-        raise StopAgentRun("Acknowledging updates is only available to the owner.")
+    require_owner(run_context, "Acknowledging updates")
 
     ids = _coerce_ids(update_ids)
     if not ids:
@@ -238,22 +247,17 @@ def queue_owner_note(title: str, body: str = "", *, source: str = "system", work
     if work_status not in WORK_STATUSES:
         work_status = "done"
 
-    values: dict[str, object] = {
-        "title": title,
-        "body": body,
-        "from_person": "@context",
-        "source": source,
-        "work_status": work_status,
-        "ack_status": "new",
-        "user_id": CANONICAL_OWNER_ID,
-    }
-    columns = ", ".join(values)
-    params = ", ".join(f":{name}" for name in values)
-    stmt = text(f"INSERT INTO {_UPDATES} ({columns}) VALUES ({params})")
-
-    engine = get_sql_engine()
-    with engine.begin() as conn:
-        conn.execute(stmt, values)
+    _insert_update(
+        {
+            "title": title,
+            "body": body,
+            "from_person": "@context",
+            "source": source,
+            "work_status": work_status,
+            "ack_status": "new",
+            "user_id": CANONICAL_OWNER_ID,
+        }
+    )
     return True
 
 

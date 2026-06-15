@@ -2,13 +2,11 @@
 Context's Provider Registry
 ===========================
 
-Wiring for the context providers available to Context. The structured database (`crm`), the knowledge base (`knowledge`), the workspace, and web are always on; Slack, Gmail, and Calendar are added to the agent when credentials are set.
+Wiring for the context providers available to Context. The structured database (`crm`), the knowledge base (`knowledge`), the workspace, and web are always on; Slack, Gmail, and Calendar are added when their credentials are set.
 
 Each provider exposes at most two tools to the main agent — `query_<id>` and `update_<id>` — so the tool surface stays linear at 2N as sources grow.
 
-`ACT_TOOLS` names the tools that act on the outside world *as the owner* — just `update_calendar` (changing the real calendar). `agents.context` flags it `requires_confirmation` so the run pauses for the owner's explicit approval before it executes. Gmail is deliberately *not* here: `update_gmail` only ever drafts (it never sends), and a draft is private and reversible, so it needs no gate (see `_create_gmail_provider`). Filing into your own store is frictionless; acting outward is gated (see `docs/SECURITY.md`).
-
-Slack messaging (`update_slack`) is deliberately **not** in `ACT_TOOLS`: posting a message — to a teammate, a channel, or another person's `@context` agent — is ordinary, low-stakes communication, so it runs ungated like a chat reply. The approval gate is reserved for the sensitive outward action (mutating the calendar). `update_slack` stays owner-only the same way every read/write tool does — it's added only in the owner branch of `context_tools`, so a guest never holds it.
+`ACT_TOOLS` is the canonical list of tools that act on the outside world *as the owner* and so are approval-gated (the run pauses for the owner's explicit OK before they execute). Only `update_calendar` qualifies. Two writes are deliberately excluded: `update_gmail` only ever drafts (never sends — private and reversible), and `update_slack` is ordinary messaging. Filing into your own store is frictionless; only the sensitive outward action is gated. See `docs/SECURITY.md`.
 """
 
 import asyncio
@@ -49,9 +47,25 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Knowledge-base root - where @context stores files. Filesystem-backed by default; set KNOWLEDGE_REPO_URL + KNOWLEDGE_GITHUB_TOKEN to switch to GitBackend at startup for durable storage with an audit trail.
 KNOWLEDGE_PATH = REPO_ROOT / "knowledge"
 
-# Tools that take action in the outside world as the owner. `agents.context` flags these `requires_confirmation` per run, so the model can never execute one without the owner's explicit approval.
-# `update_gmail` is intentionally absent: it's draft-only (see `_create_gmail_provider`), and a draft is harmless, so it isn't gated. `update_slack` is also absent — sending a Slack message is ordinary messaging (ungated), not a sensitive act. Only the calendar gates.
+# Tools that act on the outside world as the owner → approval-gated by gate_act_tools.
+# Only the calendar; gmail is draft-only, slack is ordinary messaging (see module docstring).
 ACT_TOOLS: frozenset[str] = frozenset({"update_calendar"})
+
+
+def gate_act_tools(tools: list) -> list:
+    """Flag every act tool in `tools` to pause the run for the owner's approval.
+
+    `approval_type="required"` makes the pause a persisted, blocking approval: agno
+    writes a pending row at the pause and won't continue until it's resolved, so every
+    outward action leaves an audit trail and unattended runs queue up instead of acting
+    unseen. Set per run because providers build fresh tool objects on each get_tools().
+    See `docs/SECURITY.md` (L6).
+    """
+    for t in tools:
+        if getattr(t, "name", None) in ACT_TOOLS:
+            t.requires_confirmation = True
+            t.approval_type = "required"
+    return tools
 
 
 # ---------------------------------------------------------------------------

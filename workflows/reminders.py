@@ -2,50 +2,37 @@
 Queue Reminders
 ===============
 
-Push due reminders into the owner's inbound queue.
+Push due reminders into the owner's inbound queue. @context files reminders in
+`crm.reminders` with a due date; this is the watcher that surfaces them once due.
 
-@context saves reminders in `crm.reminders`, each with a due date — but
-nothing watches that clock. This is the watcher: it finds reminders that are now
-due and surfaces them.
+A due reminder is always filed into the inbound queue, so it lands on the rundown
+alongside everything else awaiting the owner — one surface, not several. The hourly
+sweep *also* sends a best-effort Slack DM (a nudge so a timed reminder reaches the
+owner the moment it's due); the queue stays the source of truth, so a failed DM
+never fails the sweep. The manual tool skips the DM — you're already looking at the
+result when you ask in chat.
 
-There are two ways to surface a due reminder:
-1. Drop it into the owner's inbound queue, where the rundown picks it up.
-2. Ping the owner in Slack.
+Three entry points, one core (`_queue_reminders`):
+- `queue_reminders` — owner tool, for "push my due reminders now" in chat (no DM).
+- `queue_reminders_step` — what the hourly schedule runs, so the sweep fires without
+  the model deciding to call a tool. This path sends the Slack nudge.
+- `_queue_reminders` — the shared core: claim each due reminder, file it, mark it
+  surfaced so it shows once, and (only when asked) DM the owner.
 
-We always do (1): the rundown reads the queue, so a due reminder lands in the
-same place as everything else that needs the owner — one surface to run down each
-day, not several. The hourly sweep *also* does (2) when Slack is configured — a
-best-effort nudge so a timed reminder reaches the owner the moment it comes due
-instead of waiting for the next rundown. The queue stays the source of truth; the
-DM is only a ping, so if Slack fails the sweep still succeeds. (The manual tool
-skips the DM — when you ask for your due reminders in chat you're already looking
-at them.)
-
-Three ways in, one core:
-- `queue_reminders` — an owner tool, for "push my due reminders now" in chat.
-  Queues only; no DM.
-- the `queue-reminders` workflow step — what the hourly schedule runs, so the
-  sweep fires on its own without the model deciding to call a tool. This is the
-  path that also sends the Slack nudge.
-- `_queue_reminders` — the shared core: claim each due reminder, file it into the
-  queue, mark it surfaced so it shows once, and (only when asked) DM the owner.
-
-Owner-only on every path. The tool and the workflow step both check `is_owner`
-(the scheduler's verified identity counts as the owner), so a guest never
-reaches the owner's reminders. The `queue_reminders` tool is wired onto the
-context agent; the `queue_reminders_workflow` is registered with AgentOS and run
-by the hourly `queue-reminders` schedule (see `app/schedules.py`).
+Owner-only on every path (the scheduler's verified identity counts as the owner).
+The workflow is registered with AgentOS and run by the hourly `queue-reminders`
+schedule; the tool is wired onto the context agent (see `app/schedules.py`).
 """
 
 from datetime import datetime, timezone
 
-from agno.exceptions import StopAgentRun
 from agno.run import RunContext
 from agno.tools import tool
 from agno.workflow.step import Step, StepInput, StepOutput
 from agno.workflow.workflow import Workflow
 from sqlalchemy import text
 
+from agents.inbox import require_owner
 from app.identity import CANONICAL_OWNER_ID, is_owner
 from db import SCHEMA, get_postgres_db, get_sql_engine
 from workflows.notify import dm_owner
@@ -151,8 +138,7 @@ def queue_reminders(run_context: RunContext) -> str:
     due", which is a plain `query_crm` read, not a sweep that writes to the
     queue. Returns a one-line summary of what came due.
     """
-    if not is_owner(run_context):
-        raise StopAgentRun("Queueing reminders is only available to the owner.")
+    require_owner(run_context, "Queueing reminders")
     return _queue_reminders()
 
 

@@ -97,6 +97,11 @@ def owner_configured() -> bool:
     return bool(OWNER_IDS)
 
 
+def resolved_user_id(run_context: RunContext | None) -> str:
+    """This run's user_id, defaulting an unauthenticated caller to `anon`."""
+    return getattr(run_context, "user_id", None) or ANON_USER_ID
+
+
 def is_owner(run_context: RunContext | None) -> bool:
     """True iff this run's verified identity is the owner. Fails closed.
 

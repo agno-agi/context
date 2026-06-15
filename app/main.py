@@ -26,50 +26,47 @@ from workflows import WORKFLOWS
 # open their own handle to the same Postgres — see app/schedules.py and workflows/.)
 db = get_postgres_db()
 
-
-# ---------------------------------------------------------------------------
-# Environment
-# ---------------------------------------------------------------------------
+# Scheduler base URL — where cron triggers reach AgentOS (set to the deploy domain in prod).
 scheduler_base_url = getenv("AGENTOS_URL", "http://127.0.0.1:8000")
 
-# Missing OWNER_ID check: without an OWNER_ID, @context is capture-only.
-if is_prd() and not owner_configured():
-    log_warning(
-        "OWNER_ID is not set — no caller will be treated as the owner. "
-        "Context is capture-only for everyone until OWNER_ID is set."
-    )
 
-# Missing OWNER_TIMEZONE check: "today" and relative dates fall back to UTC.
-if not owner_timezone_configured():
-    log_warning(
-        "OWNER_TIMEZONE is not set (or invalid) — 'today', due/overdue math, and relative "
-        "dates use UTC. Set it to your IANA zone (e.g. America/Los_Angeles)."
-    )
-else:
-    log_info(f"OWNER_TIMEZONE={owner_timezone()}")
+def _warn_on_missing_config() -> None:
+    """Log startup warnings for unset config that silently changes behavior."""
+    # Without an OWNER_ID, @context is capture-only for everyone.
+    if is_prd() and not owner_configured():
+        log_warning(
+            "OWNER_ID is not set — no caller will be treated as the owner. "
+            "Context is capture-only for everyone until OWNER_ID is set."
+        )
+    # Without OWNER_TIMEZONE, "today" and relative dates fall back to UTC.
+    if owner_timezone_configured():
+        log_info(f"OWNER_TIMEZONE={owner_timezone()}")
+    else:
+        log_warning(
+            "OWNER_TIMEZONE is not set (or invalid) — 'today', due/overdue math, and relative "
+            "dates use UTC. Set it to your IANA zone (e.g. America/Los_Angeles)."
+        )
 
-# ---------------------------------------------------------------------------
-# Interfaces
-# - @context becomes available on Slack when both env vars are set
-# ---------------------------------------------------------------------------
-SLACK_BOT_TOKEN = getenv("SLACK_BOT_TOKEN", "")
-SLACK_SIGNING_SECRET = getenv("SLACK_SIGNING_SECRET", "")
 
-interfaces: list = []
-if SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET:
+def _build_interfaces() -> list:
+    """@context's external interfaces — Slack is added when its credentials are set."""
+    token = getenv("SLACK_BOT_TOKEN", "")
+    signing_secret = getenv("SLACK_SIGNING_SECRET", "")
+    if not (token and signing_secret):
+        return []
+
     from agno.os.interfaces.slack import Slack
 
-    interfaces.append(
+    return [
         Slack(
             agent=context,
             streaming=True,
-            token=SLACK_BOT_TOKEN,
-            signing_secret=SLACK_SIGNING_SECRET,
+            token=token,
+            signing_secret=signing_secret,
             resolve_user_identity=True,
-            # Starter chips in the assistant pane (the owner's primary surface).
-            # Rendered on `assistant_thread_started`, so the manifest must
-            # subscribe that event and enable `assistant_view`. Mirrors the
-            # quick prompts in app/config.yaml.
+            # Starter chips in the assistant pane. Rendered on `assistant_thread_started`,
+            # so the manifest must subscribe that event and enable `assistant_view`.
+            # Mirrors the quick prompts in app/config.yaml.
             suggested_prompts=[
                 {"title": "Daily rundown", "message": "Give me a rundown of what's waiting on me"},
                 {"title": "My week", "message": "What does my week look like?"},
@@ -79,15 +76,12 @@ if SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET:
                 },
             ],
         )
-    )
+    ]
 
 
-# ---------------------------------------------------------------------------
-# Lifespan — app-level startup / teardown.
-#
-# Startup: create database tables and initialize context providers.
-# Shutdown: release provider resources.
-# ---------------------------------------------------------------------------
+interfaces = _build_interfaces()
+
+
 def _enlarge_default_executor() -> None:
     """Size asyncio's default thread pool for I/O-bound provider fan-out.
 
@@ -108,7 +102,10 @@ def _enlarge_default_executor() -> None:
 
 @asynccontextmanager
 async def lifespan(app):  # type: ignore[no-untyped-def]
+    """App startup: warn on missing config, size the thread pool, create tables,
+    register schedules, set up providers. Shutdown: release provider resources."""
     log_info("@context: startup")
+    _warn_on_missing_config()
     _enlarge_default_executor()
     create_tables()
     register_schedules()
@@ -120,9 +117,6 @@ async def lifespan(app):  # type: ignore[no-untyped-def]
         log_info("@context: shutdown")
 
 
-# ---------------------------------------------------------------------------
-# Create AgentOS
-# ---------------------------------------------------------------------------
 # User isolation scopes the OS REST endpoints (sessions / memory / runs) to the
 # verified JWT user. Only takes effect when authorization is on (prod).
 _self_verification_key = getenv("CONTEXT_SELF_VERIFICATION_KEY", "").strip()
@@ -141,11 +135,10 @@ agent_os = AgentOS(
     workflows=WORKFLOWS,
     interfaces=interfaces,
     config=str(Path(__file__).parent / "config.yaml"),  # Quick prompts for the agents.
-    # Enable JWT based authorization in production.
-    authorization=is_prd(),
+    authorization=is_prd(),  # JWT authorization in production.
     authorization_config=authorization_config,
-    scheduler_base_url=scheduler_base_url,  # The base URL of the scheduler.
-    internal_service_token=getenv("INTERNAL_SERVICE_TOKEN") or None,  # The internal service token used by the AgentOS.
+    scheduler_base_url=scheduler_base_url,
+    internal_service_token=getenv("INTERNAL_SERVICE_TOKEN") or None,
     # Owner-only single-tool MCP server at /mcp — see app/mcp.py.
     enable_mcp_server=True,
     mcp_config=context_mcp_config(),

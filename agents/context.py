@@ -14,8 +14,8 @@ from agno.utils.log import log_warning
 from agents.inbox import GUEST_TOOLS, acknowledge, rundown
 from agents.instructions import CONTEXT_INSTRUCTIONS, GUEST_GUIDE, OWNER_GUIDE
 from agents.policy import enforce_capture_only, normalize_identity
-from agents.sources import ACT_TOOLS, context_providers_summary, list_contexts, owner_provider_tools
-from app.identity import ANON_USER_ID, is_owner, owner_display_name
+from agents.sources import context_providers_summary, gate_act_tools, list_contexts, owner_provider_tools
+from app.identity import ANON_USER_ID, is_owner, owner_display_name, resolved_user_id
 from app.settings import default_model, owner_timezone
 from db import get_postgres_db
 from workflows.reminders import queue_reminders
@@ -52,7 +52,6 @@ def caller_information(run_context: RunContext | None = None) -> str:
     Rendered per run by `context_instructions` (the owner gets the full guide,
     a guest the capture-only one).
     """
-    user_id = getattr(run_context, "user_id", None) or ANON_USER_ID
     if is_owner(run_context):
         skills = _skills.get_system_prompt_snippet() if _skills is not None else ""
         return OWNER_GUIDE.format(
@@ -62,17 +61,15 @@ def caller_information(run_context: RunContext | None = None) -> str:
         )
     return GUEST_GUIDE.format(
         owner_name=owner_display_name("(no owner configured)"),
-        user_id=user_id,
+        user_id=resolved_user_id(run_context),
     )
 
 
 def context_instructions(run_context: RunContext | None = None) -> str:
     """Render Context's system prompt for this run."""
-
-    user_id = getattr(run_context, "user_id", None) or ANON_USER_ID
     return CONTEXT_INSTRUCTIONS.format(
         owner_name=owner_display_name(),
-        user_id=user_id,
+        user_id=resolved_user_id(run_context),
         caller_information=caller_information(run_context),
     )
 
@@ -96,38 +93,26 @@ def _is_write_tool(name: str) -> bool:
 
 
 def context_tools(run_context: RunContext | None = None) -> list:
-    """Build Context's tool list based on the caller's identity.
+    """Build Context's tool list for this run, keyed on the caller's identity.
 
-    Wired as a callable on `Agent.tools` and resolved per run by setting `cache_callables=False`.
-
-    The owner branch gets access to the full set of tools — provider tools, the inbound queue, and runtime skills.
-    The guest branch gets access to the capture-only tool — submit_update.
+    Wired as a callable on `Agent.tools` and resolved per run (`cache_callables=False`).
+    The owner gets the full surface — provider tools, the inbound queue, runtime skills.
+    A guest gets exactly one tool: submit_update.
     """
-    if is_owner(run_context):
-        # Time-boxed provider reads so one slow source can't stall the run; Google
-        # reads also skip on a dead token. See `owner_provider_tools`.
-        tools: list = list(owner_provider_tools())
-        tools += [list_contexts, rundown, acknowledge, queue_reminders]
-        if _skills is not None:
-            tools += _skills.get_tools()
-        # Strip write tools for read-only runs (the scheduled digests).
-        if _is_read_only(run_context):
-            tools = [t for t in tools if not _is_write_tool(getattr(t, "name", ""))]
-        # The approval gate on acting as the owner: tools that reach the
-        # outside world (send email, change the calendar) pause the run for
-        # explicit confirmation before they execute. `approval_type="required"`
-        # makes that gate a *persisted, blocking* approval — agno writes a row
-        # to the approvals table at pause (status="pending") and refuses to
-        # continue the run until it's resolved, so every outward action leaves a
-        # durable audit trail (tool, args, who approved, when) and unattended
-        # (scheduled) sends queue up for the owner instead of acting unseen.
-        # Set per run — providers build fresh tool objects on every get_tools().
-        for t in tools:
-            if getattr(t, "name", None) in ACT_TOOLS:
-                t.requires_confirmation = True
-                t.approval_type = "required"
-        return tools
-    return list(GUEST_TOOLS)
+    if not is_owner(run_context):
+        return list(GUEST_TOOLS)
+
+    # Provider reads are time-boxed so one slow source can't stall the run, and Google
+    # reads skip on a dead token (see owner_provider_tools); the queue and skills layer on.
+    tools: list = list(owner_provider_tools())
+    tools += [list_contexts, rundown, acknowledge, queue_reminders]
+    if _skills is not None:
+        tools += _skills.get_tools()
+    # Scheduled digests run read-only: strip every write tool.
+    if _is_read_only(run_context):
+        tools = [t for t in tools if not _is_write_tool(getattr(t, "name", ""))]
+    # Pause for owner approval before any act tool (calendar) reaches the outside world.
+    return gate_act_tools(tools)
 
 
 context = Agent(
@@ -137,34 +122,29 @@ context = Agent(
     db=get_postgres_db(),
     instructions=context_instructions,
     tools=context_tools,
-    # Default user_id when a caller (eval runner, unauthenticated script) invokes Context without providing a user_id.
-    # Production surfaces (UI, Slack) override this with a verified identity.
+    # Unauthenticated callers (eval runner, scripts) default to this; UI/Slack override it.
     user_id=ANON_USER_ID,
-    # Resolve tools on every run based on the caller's verified identity.
+    # Resolve instructions + tools per run from the caller's verified identity.
     cache_callables=False,
-    # Pre-hook refuses unidentified prod runs and collapses the owner's configured identities onto the canonical id.
+    # Pre-hook refuses unidentified prod runs and collapses the owner's aliases onto the canonical id.
     pre_hooks=[normalize_identity],
     # Tool-hook refuses any non-capture tool from a guest caller.
     tool_hooks=[enforce_capture_only],
-    # @context can learn about the caller. Agentic mode adds `update_user_memory` + `update_profile` tools to the agent.
-    # A guest's memories and profile never touch the owner's context.
+    # Learn about the caller; agentic mode adds update_user_memory + update_profile,
+    # each keyed to the caller's own id, so a guest's memory never touches the owner's data.
     learning=LearningMachine(
         user_profile=UserProfileConfig(mode=LearningMode.AGENTIC),
         user_memory=UserMemoryConfig(mode=LearningMode.AGENTIC),
     ),
-    # Anchor "now" to the owner's local day, not the server's UTC. The rundown's
-    # "today", overdue/due math, and relative-date resolution all key off this.
-    # `OWNER_TIMEZONE` unset → "UTC" (prior behavior); the format carries the
-    # weekday + zone label so the model can frame and render times with a zone.
+    # Anchor "now" to the owner's local day (OWNER_TIMEZONE, else UTC); the rundown's
+    # "today" and due/overdue math key off this. The format carries the weekday + zone.
     add_datetime_to_context=True,
     timezone_identifier=owner_timezone(),
     datetime_format="%A %Y-%m-%d %H:%M %Z",
     add_history_to_context=True,
     read_chat_history=True,
-    # The MCP path reuses a session_id, so each call replays this many prior runs;
-    # 3 keeps continuity without a deep replay every request.
+    # The MCP path reuses a session_id; replay 3 prior runs for continuity without a deep replay.
     num_history_runs=3,
-    # Cap provider fan-out per question. Soft limit — agno lets the model answer from
-    # what it has instead of looping. Backs up the hard MCP timeout (app/mcp.py).
+    # Soft cap on provider fan-out per question; backs up the hard MCP timeout (app/mcp.py).
     tool_call_limit=12,
 )

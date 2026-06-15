@@ -147,13 +147,11 @@ def context_mcp_config() -> MCPServerConfig:
 
     Owner-only, single-tool surface:
       - ``tools=[use_context]`` — the one tool the server exposes.
-      - ``enable_builtin_tools=False`` — none of AgentOS's 19 built-ins (no
-        session/memory CRUD over MCP; the owner uses chat UI for that).
-      - ``authorize=_caller_is_owner`` — 401s non-owners after JWT, before the
-        model runs. Replaces the old ``OwnerOnlyMiddleware``.
-      - ``allowed_hosts=...`` — built-in DNS-rebinding protection. Localhost is
-        baked into AgentOS; we add the deploy/tunnel host. Replaces the old
-        ``_mcp_transport_security()`` helper.
+      - ``enable_builtin_tools=False`` — none of AgentOS's built-ins (no
+        session/memory CRUD over MCP; the owner uses the chat UI for that).
+      - ``authorize=_caller_is_owner`` — 401s non-owners (after JWT, before the model runs).
+      - ``allowed_hosts=...`` — DNS-rebinding protection; localhost is baked into
+        AgentOS, we add the deploy/tunnel host.
     """
     return MCPServerConfig(
         tools=[use_context],

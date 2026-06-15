@@ -58,19 +58,16 @@ def get_postgres_db() -> PostgresDb:
     return PostgresDb(id="context-db", db_url=db_url)
 
 
-# Write guard for get_sql_engine. A heuristic belt, NOT the primary defense:
-# the real confinement for unqualified writes is the connection's
-# search_path=crm,public (so an unqualified CREATE/INSERT lands in
-# `crm`). This regex backs that up two ways:
-#   1. Reject writes explicitly qualified to public.* / ai.* (agno's schema).
-#   2. Reject statements that would *subvert* the search_path confinement —
-#      repointing search_path, switching/altering roles, or GRANT/REVOKE/COPY.
+# Write guard for get_sql_engine — a heuristic belt, NOT the primary defense. The
+# real confinement is the connection's search_path=crm,public, so an unqualified
+# write lands in `crm`. This regex backs that up by rejecting:
+#   1. writes explicitly qualified to public.* / ai.* (agno's schema), and
+#   2. statements that would subvert the search_path confinement — repointing
+#      search_path, switching/altering roles, or GRANT/REVOKE/COPY.
 # Each is anchored to a statement boundary (start-of-string or after `;`) so a
-# value like INSERT ... VALUES ('grant me access') can't false-trigger.
-# This is still not exhaustive (DO blocks, dynamic SQL). The proper
-# belt-and-suspenders is a least-privilege DB role with no rights on
-# public/ai — NOT applied here, because the default compose/Railway role owns
-# its database; see docs/SECURITY.md if you tighten this for a shared cluster.
+# value like INSERT ... VALUES ('grant me access') can't false-trigger. Not
+# exhaustive (DO blocks, dynamic SQL); the full fix is a least-privilege DB role,
+# not applied here because the compose/Railway role owns its database. See docs/SECURITY.md.
 _FOREIGN_SCHEMA_WRITE_RE = re.compile(
     r"""(?ix)
     (?:create|alter|drop)\s+
