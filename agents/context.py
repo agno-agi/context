@@ -167,5 +167,4 @@ context = Agent(
     # Cap provider fan-out per question. Soft limit — agno lets the model answer from
     # what it has instead of looping. Backs up the hard MCP timeout (app/mcp.py).
     tool_call_limit=12,
-    markdown=True,
 )
