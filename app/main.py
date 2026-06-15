@@ -22,8 +22,7 @@ from app.settings import is_prd, owner_timezone, owner_timezone_configured, runt
 from db import create_tables, get_postgres_db
 from workflows import WORKFLOWS
 
-# One database handle for AgentOS persistence. (The scheduler and each workflow
-# open their own handle to the same Postgres — see app/schedules.py and workflows/.)
+# One database session for AgentOS persistence. (The scheduler and workflows open their own sessions)
 db = get_postgres_db()
 
 # Scheduler base URL — where cron triggers reach AgentOS (set to the deploy domain in prod).
