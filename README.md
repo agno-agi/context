@@ -62,6 +62,42 @@ docker compose up -d --build
 
 Confirm it is live at [http://localhost:8000/docs](http://localhost:8000/docs).
 
+## MCP server
+
+The main way to use @context is from an MCP client like Claude Code, Codex, Claude, and ChatGPT.
+
+@context comes with an MCP server at `http://localhost:8000/mcp`. I use it with claude code to manage product spects, which another claude code or codex instance can implement. I also use it with desktop apps (Claude, ChatGPT) and web clients (ChatGPT web, Claude web).
+
+> Note: @context's MCP server is always on and **owner-only**.
+
+To add it to a CLI client, run:
+
+```sh
+# Claude Code — user scope, so @context is there in every project
+claude mcp add -s user --transport http context http://localhost:8000/mcp
+claude mcp list            # context: http://localhost:8000/mcp (HTTP) - ✓ Connected
+
+# Codex
+codex mcp add --url http://localhost:8000/mcp context
+```
+
+The **desktop apps** (Claude, ChatGPT) take a manual step: their "Add custom connector" dialog only accepts `https` URLs, so we reach the local server through a small [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) stdio bridge instead. For Claude Desktop, add this to `~/Library/Application Support/Claude/claude_desktop_config.json` (keep any existing keys) and restart the app:
+
+```json
+{
+  "mcpServers": {
+    "context": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8000/mcp", "--transport", "http-only"]
+    }
+  }
+}
+```
+
+The **web clients** (ChatGPT web, Claude web) can't reach localhost — give them a public HTTPS URL by deploying or tunnelling (`https://<domain>/mcp` + `Authorization: Bearer <JWT>`, the same two paths as Slack).
+
+[`docs/MCP.md`](docs/MCP.md) has the full per-client guide (CLI scope, deployed-instance auth, the GUI-`PATH` `npx` gotcha) and how it's secured (owner-only, fail-closed, DNS-rebinding protection).
+
 ## AgentOS UI
 
 @context runs on AgentOS, which comes with a web UI for interacting with @context. Use the AgentOS UI to chat with @context, view sessions, approve actions and more.
@@ -89,16 +125,6 @@ Read [`docs/SLACK.md`](docs/SLACK.md) for the Slack setup guide.
 Notes:
 - Agno's AgentOS automatically sets up the Slack interface when the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` env vars are set.
 - The `resolve_user_identity=True` flag tells the AgentOS to resolve the Slack user identity to an email, which is what `OWNER_ID` matches against to determine the caller's role (owner or guest).
-
-## MCP server
-
-@context ships a one-tool MCP server — `use_context` — so you can use it from any MCP client. Ask it anything, tell it anything to remember, or have it act — it figures out the rest.
-
-Desktop apps (Claude, ChatGPT) and CLI clients (Claude Code, Codex) reach it on localhost with zero setup — point them at `http://localhost:8000/mcp`. The client picks it up and uses it on its own; you don't have to call @context by name.
-
-Cloud clients can't reach localhost — use an ngrok tunnel or a deployed instance: `https://<domain>/mcp` with `Authorization: Bearer <JWT>`. Same two paths as Slack.
-
-It runs as you, the owner, so it's owner-only and fail-closed. More in [docs/MCP.md](docs/MCP.md).
 
 ## @context Knowledge Base
 
@@ -215,7 +241,7 @@ See [`docs/SLACK.md`](docs/SLACK.md#moving-from-local-to-production) for full st
 
 ### The app (`app/`)
 
-@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the always-on owner-only MCP server — one tool (`use_context`) that lets you read, act, and file through @context from the Claude/ChatGPT desktop apps and CLI clients (see below).
+@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the always-on owner-only MCP server — one tool (`use_context`) that lets you read, act, and file through @context from the Claude/ChatGPT desktop apps and CLI clients (see [MCP server](#mcp-server)).
 
 ### The agents (`agents/`)
 
@@ -272,7 +298,7 @@ python -m evals --case <name>  # one case
 | `OWNER_NAME` | no | canonical `OWNER_ID` | Display name rendered into the prompt. Cosmetic, never matched as an identity. |
 | `RUNTIME_ENV` | no | `prd` | `dev` enables hot-reload and disables JWT. Compose sets this to `dev` for local. |
 | `JWT_VERIFICATION_KEY` | prd | none | Public key from os.agno.com. Required when `RUNTIME_ENV=prd`. |
-| `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production. |
+| `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Also anchors the MCP server's Host allowlist — set it to your Railway/ngrok domain so the deployed or tunnelled `/mcp` endpoint accepts that Host (see [`docs/MCP.md`](docs/MCP.md)). |
 | `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Set it when running more than one replica behind one URL — see [`docs/SCALING.md`](docs/SCALING.md). |
 | `PARALLEL_API_KEY` | no | none | Switches the `web` source from keyless Parallel MCP to the authenticated SDK (higher rate ceiling). |
 | `SLACK_BOT_TOKEN` / `SLACK_SIGNING_SECRET` | no | none | Both enable the Slack interface. The bot token alone activates the `slack` source (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests. See [`docs/SLACK.md`](docs/SLACK.md). |

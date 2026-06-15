@@ -2,13 +2,14 @@
 Context MCP server
 ======================
 
-@context comes with a one-tool MCP server (`use_context`) which allows the owner
-to interact with it via MCP clients like Claude and ChatGPT.
+@context comes with a one-tool MCP server (`use_context`) which lets the owner
+read, file, and act through @context from MCP clients — Claude Code, Codex, and
+the Claude / ChatGPT desktop apps.
 
-Desktop Apps like claude and chatGPT and CLI clients like claude code and codex
-can reach it on localhost with 0 setup.
-
-Cloud clients can reach an ngrok tunnel or a deployed instance (see docs/MCP.md).
+The CLI clients register it with one command (`claude mcp add` / `codex mcp add`)
+against http://localhost:8000/mcp; the desktop apps reach the same endpoint
+through a small mcp-remote stdio bridge. Cloud clients (ChatGPT web, Claude web)
+need a public HTTPS URL — a deploy or an ngrok tunnel (see docs/MCP.md).
 
 The @context mcp server exposes one tool:
 

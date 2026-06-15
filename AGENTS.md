@@ -49,7 +49,7 @@ Shared:
 - Scheduler enabled by default (`scheduler=True`). Scheduled runs arrive with the verified identity `__scheduler__`, which `is_owner` treats as the owner (the scheduler is the owner's automation — see `docs/SECURITY.md`).
 - Slack interface is added automatically when both `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` are set, routed to `context` ([`docs/SLACK.md`](docs/SLACK.md)).
 - JWT auth on whenever `RUNTIME_ENV == "prd"`, with `user_isolation=True` (so production deploys are gated by default).
-- Owner-only MCP server (`use_context` at `/mcp`) is **always on** — the owner's read/act/file surface for the Claude/ChatGPT desktop apps and CLI clients (localhost, zero setup), fail-closed (not a guest path). See [`docs/MCP.md`](docs/MCP.md).
+- Owner-only MCP server (`use_context` at `/mcp`) is **always on** — the owner's read/act/file surface for the Claude/ChatGPT desktop apps and CLI clients (localhost; one `claude mcp add` / `codex mcp add` for the CLIs, a stdio bridge for the desktop apps), fail-closed (not a guest path). See [`docs/MCP.md`](docs/MCP.md).
 
 ## Key Files
 
@@ -182,7 +182,7 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 | `OWNER_NAME` | no | — | The owner's display name, rendered into the agent's prompt ("Ash's professional alter-ego"). Cosmetic only — never matched as an identity. Falls back to the canonical `OWNER_ID` entry. |
 | `RUNTIME_ENV` | no | `prd` | `dev` enables hot-reload and disables JWT. Compose sets this to `dev` for local. |
 | `JWT_VERIFICATION_KEY` | prd | — | Public key from os.agno.com. Required when `RUNTIME_ENV=prd` and `authorization=True`. |
-| `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production so cron triggers reach AgentOS. |
+| `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Set to your Railway domain in production so cron triggers reach AgentOS — and so the MCP server's Host allowlist accepts that domain (deploy/tunnel; see [`docs/MCP.md`](docs/MCP.md)). |
 | `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. Auto-generated per process; pin it when running more than one replica behind one URL (railway.json ships one by default — see [`docs/SCALING.md`](docs/SCALING.md)). |
 | `PARALLEL_API_KEY` | no | — | Switches the `web` provider from the keyless Parallel MCP endpoint to the authenticated Parallel SDK (higher rate ceiling). |
 | `SLACK_BOT_TOKEN` | no | — | Bot token. Activates the `slack` provider on its own (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests; set with the signing secret to enable the Slack interface ([`docs/SLACK.md`](docs/SLACK.md)). |
@@ -234,9 +234,9 @@ Token caches live at `gmail_token.json` / `calendar_token.json` (override with `
 
 ## MCP (owner-only read/act/file server)
 
-The MCP server is **always on** — [`app/main.py`](app/main.py) mounts it at `/mcp` unconditionally (it's not a setting to opt into). It exposes one tool, `use_context(message, session_id?)`, running the *real* `context` agent ([`app/mcp.py`](app/mcp.py)) as the **owner**. The point is the lowest-friction way in: the **Claude / ChatGPT desktop apps and CLI clients (Claude Code, Codex) reach it on localhost with zero setup** (`http://localhost:8000/mcp`, no token in dev), and the client learns about @context and uses it without the owner prompting. Cloud clients (ChatGPT web, Claude web) can't reach localhost — deploy (connector URL `https://<your-domain>/mcp` + `Authorization: Bearer <JWT>`) or tunnel with ngrok, the same paths as Slack.
+The MCP server is **always on** — [`app/main.py`](app/main.py) mounts it at `/mcp` unconditionally (it's not a setting to opt into). It exposes one tool, `use_context(message, session_id?)`, running the *real* `context` agent ([`app/mcp.py`](app/mcp.py)) as the **owner**. The point is the lowest-friction way in: the **CLI clients (Claude Code, Codex) register it with one command** (`claude mcp add` / `codex mcp add` → `http://localhost:8000/mcp`, no token in dev), the **desktop apps (Claude, ChatGPT) reach it through a small `mcp-remote` stdio bridge**, and the client then learns about @context and uses it without the owner prompting. Cloud clients (ChatGPT web, Claude web) can't reach localhost — deploy (connector URL `https://<your-domain>/mcp` + `Authorization: Bearer <JWT>`) or tunnel with ngrok, the same paths as Slack.
 
-It's owner-only — **not** a guest path; teammates keep their Slack write path. Owner-only and fail-closed (see [`docs/SECURITY.md`](docs/SECURITY.md) L7): in prod the same JWT middleware AgentOS uses validates the token, then `OwnerOnlyMiddleware` 401s anyone not in `OWNER_ID` — it never falls back to the guest surface; an always-on local server is a DNS-rebinding target, so host validation is on (anchored on localhost + the `AGENTOS_URL` host). We run our own server (not AgentOS's `enable_mcp_server`) so identity is threaded through. Full setup and the Claude/ChatGPT connector steps are in [`docs/MCP.md`](docs/MCP.md).
+It's owner-only — **not** a guest path; teammates keep their Slack write path. Owner-only and fail-closed (see [`docs/SECURITY.md`](docs/SECURITY.md) L7): in prod the same JWT middleware AgentOS uses validates the token, then `OwnerOnlyMiddleware` 401s anyone not in `OWNER_ID` — it never falls back to the guest surface; an always-on local server is a DNS-rebinding target, so host validation is on (anchored on localhost + the `AGENTOS_URL` host, a non-allowed Host → 421). We run our own server (not AgentOS's `enable_mcp_server`) so identity is threaded through. The per-client setup steps (Claude Code, Codex, the desktop bridge, cloud) are in [`docs/MCP.md`](docs/MCP.md).
 
 ## Deploying to Railway
 

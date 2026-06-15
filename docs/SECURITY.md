@@ -214,8 +214,9 @@ approval-gated like the calendar — see [`docs/GOOGLE.md`](GOOGLE.md).)
 
 The MCP server ([`app/mcp.py`](../app/mcp.py), [`docs/MCP.md`](MCP.md)) is
 **always on** and exposes one tool, `use_context`, so the owner can drive
-`@context` from MCP clients — the Claude / ChatGPT desktop apps reach it on
-localhost with no setup. It is **not** a new trust boundary: it's the *same*
+`@context` from MCP clients — the CLI clients (Claude Code, Codex) register it on
+localhost with one command, the desktop apps through a small stdio bridge. It is
+**not** a new trust boundary: it's the *same*
 `context` agent reached over a different transport, so the whole owner/guest model
 above still applies. What's specific to it is the door: it must admit only the
 owner, and fail closed.
