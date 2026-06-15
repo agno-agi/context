@@ -130,12 +130,11 @@ def assert_boundary_is_structural() -> tuple[bool, str]:
     return True, f"guest={sorted(guest)} · owner holds {len(owner)} tools incl. reads + act"
 
 
-def assert_mcp_channel_is_owner_only() -> tuple[bool, str]:
+def assert_mcp_server_is_owner_only() -> tuple[bool, str]:
     """Deterministic proof the owner-only MCP server is fail-closed.
 
-    The MCP server (`ask_context` / `update_context`) is the owner's private
-    read/act/file surface over MCP — both tools share one gate
-    (`OwnerOnlyMiddleware`), which must accept the owner and reject
+    The MCP server (`use_context`) is the owner's private read/act/file surface
+    over MCP. Its gate (`OwnerOnlyMiddleware`) must accept the owner and reject
     everyone else with 401 — never fall back to the guest surface. We check the
     gate's decision function directly (`_caller_is_owner`, what the middleware
     401s on): the owner is accepted and resolves to the *owner* toolset; a guest,
@@ -217,10 +216,10 @@ CASES: tuple[Case, ...] = (
     # The same asymmetry on the owner-only MCP server: the gate accepts the
     # owner and 401s everyone else — it never becomes a guest path.
     Case(
-        name="mcp_channel_is_owner_only",
+        name="mcp_server_is_owner_only",
         agent=context,
         input="(deterministic MCP gate assertion — the agent is not run)",
-        structural=assert_mcp_channel_is_owner_only,
+        structural=assert_mcp_server_is_owner_only,
     ),
     # -- The owner is competent -------------------------------------------
     # A capable owner surface is what makes the guest denial meaningful (an

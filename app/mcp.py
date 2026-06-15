@@ -2,18 +2,21 @@
 Context MCP server
 ======================
 
-@context comes with a two-tool MCP server (`ask_context` / `update_context`)
-which allows the owner to interact with it via MCP clients like Claude and ChatGPT.
+@context comes with a one-tool MCP server (`use_context`) which allows the owner
+to interact with it via MCP clients like Claude and ChatGPT.
 
 Desktop Apps like claude and chatGPT and CLI clients like claude code and codex
 can reach it on localhost with 0 setup.
 
 Cloud clients can reach an ngrok tunnel or a deployed instance (see docs/MCP.md).
 
-The @context mcp server exposes two tools:
+The @context mcp server exposes one tool:
 
-- `ask_context(message, session_id?)`
-- `update_context(message, session_id?)`
+- `use_context(message, session_id?)`
+
+One tool, not several: `use_context` runs the real context agent as the owner,
+which reads, files, and acts on its own — so the client has one obvious door for
+anything about the owner's work, rather than a read-vs-write routing decision.
 """
 
 from collections.abc import Awaitable, Callable
@@ -37,22 +40,15 @@ from app.settings import is_prd
 # the public path (https://<host>/mcp).
 MCP_PATH = "/mcp"
 
-ASK_CONTEXT_DESCRIPTION = (
-    "Read from or act through the owner's @context — their personal context "
-    "agent. Use to answer a question or pull things together from the CRM / "
-    "structured store, the knowledge base, the workspace, the web, and (when "
-    "configured) Slack, Gmail, and Calendar. Examples: 'what's waiting on me?', "
-    "'what do we know about Acme?', 'draft a reply to Sarah'. Optionally pass "
-    "session_id to continue an earlier thread. Owner-only."
-)
-
-UPDATE_CONTEXT_DESCRIPTION = (
-    "Add to or update the owner's @context — file something worth remembering or "
-    "acting on. Use to leave an update, save a contact, note, or decision, set a "
-    "reminder, or record what happened. Examples: 'met Sarah from Acme, follow "
-    "up Friday', 'we decided to ship the MCP server first', 'remind me to review "
-    "the deck tomorrow'. Pass a natural-language statement (not a question). "
-    "Optionally pass session_id to continue an earlier thread. Owner-only."
+USE_CONTEXT_DESCRIPTION = (
+    "Your personal context agent — it holds the owner's work life. Use it to "
+    "look things up (what's on my plate, what we know about a person / company / "
+    "project, my schedule, my inbox), to save or update anything worth remembering "
+    "(notes, decisions, contacts, reminders, status), and to act (draft a reply, "
+    "message someone, propose a calendar change). Reach for it whenever the user "
+    "asks about their work, people, or plans — or mentions something worth keeping. "
+    "Pass a natural-language request; optionally pass session_id to continue a "
+    "thread. Owner-only."
 )
 
 
@@ -119,7 +115,7 @@ class OwnerOnlyMiddleware(BaseHTTPMiddleware):
     Runs after the JWT middleware (in prod) has resolved the verified identity
     onto ``request.state``. Resolves the caller; if it is not the owner it
     returns 401 *before* the MCP machinery and the model ever run. On success it
-    stashes the resolved owner id on ``request.state`` for the tools to read.
+    stashes the resolved owner id on ``request.state`` for the tool to read.
     """
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
@@ -136,8 +132,8 @@ class OwnerOnlyMiddleware(BaseHTTPMiddleware):
 async def _run_as_owner(ctx: Context, message: str, session_id: str | None) -> str:
     """Run the real context agent as the owner and return its reply.
 
-    Shared body for both MCP tools — they get the owner's full read/write surface;
-    the agent decides what to do with the message.
+    The body of `use_context` — the caller gets the owner's full read/write/act
+    surface; the agent decides what to do with the message.
     """
     request: Request | None = getattr(getattr(ctx, "request_context", None), "request", None)
     caller = _resolve_caller_id(request)
@@ -162,7 +158,7 @@ async def _run_as_owner(ctx: Context, message: str, session_id: str | None) -> s
 def build_context_mcp_app(
     *, authorization: bool = False, authorization_config: AuthorizationConfig | None = None
 ) -> Starlette:
-    """Build the owner-only MCP sub-app: two tools, owner-gated, fail-closed.
+    """Build the owner-only MCP sub-app: one tool, owner-gated, fail-closed.
 
     ``authorization`` / ``authorization_config`` are the *same* values AgentOS
     is constructed with (passed in from [`app/main.py`](main.py)), so the JWT
@@ -170,12 +166,8 @@ def build_context_mcp_app(
     """
     server = FastMCP(name="context", transport_security=_mcp_transport_security())
 
-    @server.tool(name="ask_context", description=ASK_CONTEXT_DESCRIPTION)
-    async def ask_context(message: str, ctx: Context, session_id: str | None = None) -> str:
-        return await _run_as_owner(ctx, message, session_id)
-
-    @server.tool(name="update_context", description=UPDATE_CONTEXT_DESCRIPTION)
-    async def update_context(message: str, ctx: Context, session_id: str | None = None) -> str:
+    @server.tool(name="use_context", description=USE_CONTEXT_DESCRIPTION)
+    async def use_context(message: str, ctx: Context, session_id: str | None = None) -> str:
         return await _run_as_owner(ctx, message, session_id)
 
     mcp_app = server.streamable_http_app()

@@ -213,8 +213,8 @@ app = agent_os.get_app()
 # ---------------------------------------------------------------------------
 # Owner-only MCP server
 #
-# @context comes with a two-tool MCP server (`ask_context` / `update_context`)
-# which allows the owner to read and act from MCP clients like Claude and ChatGPT.
+# @context comes with a one-tool MCP server (`use_context`) which allows the
+# owner to read, file, and act from MCP clients like Claude and ChatGPT.
 # ---------------------------------------------------------------------------
 mcp_app = build_context_mcp_app(authorization=is_prd(), authorization_config=authorization_config)
 

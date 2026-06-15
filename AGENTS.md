@@ -34,7 +34,7 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │
 ├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today
 │
-├── MCP server (app/mcp.py)                     always-on owner-only `ask_context` + `update_context` at /mcp — read/act/file via Claude/ChatGPT desktop + CLI
+├── MCP server (app/mcp.py)                     always-on owner-only `use_context` at /mcp — read/act/file via Claude/ChatGPT desktop + CLI
 │
 └── Owner policy (agents/policy.py + app/identity.py)
     identity-conditioned toolset, pre-hook, tool-hook — all from a verified id
@@ -46,7 +46,7 @@ Shared:
 - Scheduler enabled by default (`scheduler=True`). Scheduled runs arrive with the verified identity `__scheduler__`, which `is_owner` treats as the owner (the scheduler is the owner's automation — see `docs/SECURITY.md`).
 - Slack interface is added automatically when both `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` are set, routed to `context` ([`docs/SLACK.md`](docs/SLACK.md)).
 - JWT auth on whenever `RUNTIME_ENV == "prd"`, with `user_isolation=True` (so production deploys are gated by default).
-- Owner-only MCP server (`ask_context` + `update_context` at `/mcp`) is **always on** — the owner's read/act/file surface for the Claude/ChatGPT desktop apps and CLI clients (localhost, zero setup), fail-closed (not a guest path). See [`docs/MCP.md`](docs/MCP.md).
+- Owner-only MCP server (`use_context` at `/mcp`) is **always on** — the owner's read/act/file surface for the Claude/ChatGPT desktop apps and CLI clients (localhost, zero setup), fail-closed (not a guest path). See [`docs/MCP.md`](docs/MCP.md).
 
 ## Key Files
 
@@ -54,7 +54,7 @@ Shared:
 |------|---------|
 | [`app/main.py`](app/main.py) | AgentOS entrypoint — lifespan (create tables + setup/close providers), conditional Slack, JWT gate, `OWNER_ID` warning, conditional owner-only MCP mount. |
 | [`app/identity.py`](app/identity.py) | `OWNER_ID` parsing + `is_owner(run_context)` — the verdict the whole owner/guest model keys off. Fails closed. |
-| [`app/mcp.py`](app/mcp.py) | The always-on owner-only MCP server — two tools (`ask_context` / `update_context`) running the `context` agent as the owner; fail-closed `OwnerOnlyMiddleware` (JWT then owner check → 401) + DNS-rebinding protection, so it's never a guest path ([`docs/MCP.md`](docs/MCP.md)). |
+| [`app/mcp.py`](app/mcp.py) | The always-on owner-only MCP server — one tool (`use_context`) running the `context` agent as the owner; fail-closed `OwnerOnlyMiddleware` (JWT then owner check → 401) + DNS-rebinding protection, so it's never a guest path ([`docs/MCP.md`](docs/MCP.md)). |
 | [`app/settings.py`](app/settings.py) | `default_model()` factory. |
 | [`app/config.yaml`](app/config.yaml) | Quick prompts for the `context` agent. |
 | [`agents/context.py`](agents/context.py) | The `context` Agent — identity-conditioned `tools=` callable, identity-resolved prompt (`caller_information`), defense-in-depth hooks, owner-gated skills. |
@@ -70,7 +70,7 @@ Shared:
 | [`db/schema.py`](db/schema.py) | Single source for the structured store — `TABLES` renders the DDL (`create_tables()`, run at startup) *and* the agent's table-awareness. |
 | [`db/session.py`](db/session.py) | Two engines (write-guarded + read-only) + `get_postgres_db()` for agno persistence. |
 | [`db/url.py`](db/url.py) | Builds the database URL from env. |
-| [`evals/cases.py`](evals/cases.py) | Eval cases against `context` — the owner/guest asymmetry proven by deterministic structural gates (`boundary_is_structural`, `mcp_channel_is_owner_only`) plus an adversarial guest arc and owner-competence cases (judge / reliability / capture-only checks). |
+| [`evals/cases.py`](evals/cases.py) | Eval cases against `context` — the owner/guest asymmetry proven by deterministic structural gates (`boundary_is_structural`, `mcp_server_is_owner_only`) plus an adversarial guest arc and owner-competence cases (judge / reliability / capture-only checks). |
 | [`evals/__main__.py`](evals/__main__.py) | `python -m evals` runner — runs each case (or the deterministic gate), wiring Agno's `AgentAsJudgeEval` + `ReliabilityEval` with a trace-level capture-only check; one event loop, judge/reliability results to `eval_db`. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | The owner/guest security & authorization design — including act tools and the approval gate. |
 | [`docs/SLACK.md`](docs/SLACK.md) | Slack setup — app manifest, identity resolution, both sides of the boundary. |
@@ -229,7 +229,7 @@ Token caches live at `gmail_token.json` / `calendar_token.json` (override with `
 
 ## MCP (owner-only read/act/file server)
 
-The MCP server is **always on** — [`app/main.py`](app/main.py) mounts it at `/mcp` unconditionally (it's not a setting to opt into). It exposes two tools, `ask_context(message, session_id?)` (read / act) and `update_context(message, session_id?)` (file / update), both running the *real* `context` agent ([`app/mcp.py`](app/mcp.py)) as the **owner**. The point is the lowest-friction way in: the **Claude / ChatGPT desktop apps and CLI clients (Claude Code, Codex) reach it on localhost with zero setup** (`http://localhost:8000/mcp`, no token in dev), and the client learns about @context and uses it without the owner prompting. Cloud clients (ChatGPT web, Claude web) can't reach localhost — deploy (connector URL `https://<your-domain>/mcp` + `Authorization: Bearer <JWT>`) or tunnel with ngrok, the same paths as Slack.
+The MCP server is **always on** — [`app/main.py`](app/main.py) mounts it at `/mcp` unconditionally (it's not a setting to opt into). It exposes one tool, `use_context(message, session_id?)`, running the *real* `context` agent ([`app/mcp.py`](app/mcp.py)) as the **owner**. The point is the lowest-friction way in: the **Claude / ChatGPT desktop apps and CLI clients (Claude Code, Codex) reach it on localhost with zero setup** (`http://localhost:8000/mcp`, no token in dev), and the client learns about @context and uses it without the owner prompting. Cloud clients (ChatGPT web, Claude web) can't reach localhost — deploy (connector URL `https://<your-domain>/mcp` + `Authorization: Bearer <JWT>`) or tunnel with ngrok, the same paths as Slack.
 
 It's owner-only — **not** a guest path; teammates keep their Slack write path. Owner-only and fail-closed (see [`docs/SECURITY.md`](docs/SECURITY.md) L7): in prod the same JWT middleware AgentOS uses validates the token, then `OwnerOnlyMiddleware` 401s anyone not in `OWNER_ID` — it never falls back to the guest surface; an always-on local server is a DNS-rebinding target, so host validation is on (anchored on localhost + the `AGENTOS_URL` host). We run our own server (not AgentOS's `enable_mcp_server`) so identity is threaded through. Full setup and the Claude/ChatGPT connector steps are in [`docs/MCP.md`](docs/MCP.md).
 
