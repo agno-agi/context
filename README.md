@@ -95,11 +95,9 @@ Notes:
 The knowledge base is configured as filesystem-backed by default (a gitignored `knowledge/` folder in this repo) but I highly recommend pointing it to a git repo or notion database for production. See [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) for the full guide.
 
 Try:
-- *"Draft a spec to build our own agent-platform using agno"*
-- *"Summarize the agent-factories spec"*
-- *"What's our pgvector standard for new services?"*
-- *"Write up a decision: we're standardizing on pgvector 18"*
-- *"What in my knowledge base needs attention?"*
+- *Write a one-pager on the advantages of building our own agent-platform*
+- *Write up a decision: we're standardizing on agno*
+- *What in my knowledge base needs attention?*
 
 ## @context CRM
 
