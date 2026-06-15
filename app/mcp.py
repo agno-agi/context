@@ -19,6 +19,7 @@ which reads, files, and acts on its own — so the client has one obvious door f
 anything about the owner's work, rather than a read-vs-write routing decision.
 """
 
+import logging
 from collections.abc import Awaitable, Callable
 from os import getenv
 from urllib.parse import urlparse
@@ -164,7 +165,16 @@ def build_context_mcp_app(
     is constructed with (passed in from [`app/main.py`](main.py)), so the JWT
     layer here is identical to the REST API's — same keys, same algorithm.
     """
+    # FastMCP.__init__ calls logging.basicConfig() with a default RichHandler,
+    # which hijacks the *root* logger and reformats every library's logs (httpx,
+    # mcp) with timestamp + file:line columns. Undo that global side effect by
+    # dropping the handler(s) it adds to root — leaving any pre-existing root
+    # handlers untouched — so the rest of the app keeps its own logging.
+    _root_handlers_before = logging.root.handlers[:]
     server = FastMCP(name="context", transport_security=_mcp_transport_security())
+    for handler in logging.root.handlers[:]:
+        if handler not in _root_handlers_before:
+            logging.root.removeHandler(handler)
 
     @server.tool(name="use_context", description=USE_CONTEXT_DESCRIPTION)
     async def use_context(message: str, ctx: Context, session_id: str | None = None) -> str:
