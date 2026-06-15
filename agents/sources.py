@@ -38,6 +38,7 @@ from agents.instructions import (
     KNOWLEDGE_READ,
     KNOWLEDGE_WRITE,
     SLACK_READ,
+    WORKSPACE_READ,
 )
 from app.settings import backbone_query_timeout, default_model, provider_query_timeout
 from db import SCHEMA, get_readonly_engine, get_sql_engine
@@ -172,6 +173,7 @@ def _create_workspace_provider() -> WorkspaceContextProvider:
     return WorkspaceContextProvider(
         root=REPO_ROOT,
         model=default_model(),
+        instructions=WORKSPACE_READ,  # one focused pass, cite paths — see WORKSPACE_READ
         exclude_patterns=[*DEFAULT_EXCLUDE_PATTERNS, "*_token.json", "google-service-account.json"],
     )
 
@@ -475,11 +477,13 @@ def _google_token_precheck(provider_id: str):
     return _precheck
 
 
-# Backbone read sources — the brief's spine. They get a longer per-source budget
-# than best-effort sources (see backbone_query_timeout) so they reliably land in the
-# concurrent fan-out, where best-effort sources still skip fast. Just the CRM today;
+# Sources whose reads need a longer per-source budget than the fast best-effort cap
+# (see backbone_query_timeout), so they reliably land instead of being cut off mid-read:
+# the CRM (the rundown's spine, a structured query) and the workspace (a codebase
+# question is list_files + a couple of file reads, which a tight cap can't fit — its
+# read count is bounded instead by WORKSPACE_READ). Best-effort sources still skip fast;
 # the inbound queue (`rundown`) isn't a query_* sub-agent, so it isn't time-boxed.
-BACKBONE_SOURCES: frozenset[str] = frozenset({"crm"})
+BACKBONE_SOURCES: frozenset[str] = frozenset({"crm", "workspace"})
 
 
 def owner_provider_tools() -> list:
