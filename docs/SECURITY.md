@@ -22,7 +22,7 @@ deploy: their database, their knowledge base, their keys.
 | The owner's stored context (CRM, knowledge base, queue) | Any guest caller reading it | Identity-conditioned toolset — guests get no read tools |
 | The ack axis (what's "handled") | Anyone but the owner marking items done/acknowledged | Only the owner's toolset has the ack tool |
 | Acting *as* the owner (changing the calendar) | The model doing it unprompted; guests triggering it | Owner-only act tool + a per-call approval gate — the run pauses until the owner confirms (L6). Email is draft-only, so @context never sends. |
-| Reading / acting through the MCP channel | Any non-owner reaching the `/mcp` connector | Owner-only, fail-closed gate — JWT then an owner check that 401s everyone else (L7) |
+| Reading / acting / filing through the MCP server | Any non-owner reaching the `/mcp` connector | Owner-only, fail-closed gate — JWT then an owner check that 401s everyone else; DNS-rebinding protection on (L7) |
 | Identity itself | A caller or the model forging "I am the owner" | Trusted identity from verified JWT / Slack HMAC, not the request body |
 | Data at rest | Cross-user reads via the OS REST API | `user_isolation` + `user_id`-scoped engines |
 
@@ -210,40 +210,47 @@ and message, but never change the calendar. (To let @context send email for you,
 re-enable the send tools and add `update_gmail` to `ACT_TOOLS` so sends are
 approval-gated like the calendar — see [`docs/GOOGLE.md`](GOOGLE.md).)
 
-### L7 — The MCP channel is owner-only, fail-closed
+### L7 — The MCP server is owner-only, fail-closed
 
-The optional MCP channel ([`app/mcp.py`](../app/mcp.py),
-[`docs/MCP.md`](MCP.md)) exposes one tool, `ask_context`, so the owner can read
-and act through `@context` from MCP clients (Claude, ChatGPT). It is **not** a
-new trust boundary — it's the *same* `context` agent reached over a different
-transport, so the whole owner/guest model above still applies. What's specific
-to it is the door: it must admit only the owner, and fail closed.
+The MCP server ([`app/mcp.py`](../app/mcp.py), [`docs/MCP.md`](MCP.md)) is
+**always on** and exposes two tools, `ask_context` (read / act) and
+`update_context` (file / update), so the owner can drive `@context` from MCP
+clients — the Claude / ChatGPT desktop apps reach it on localhost with no setup.
+It is **not** a new trust boundary: it's the *same* `context` agent reached over a
+different transport, so the whole owner/guest model above still applies, and both
+tools run the owner agent (the second adds no privilege — it's the same surface
+the first already grants). What's specific to it is the door: it must admit only
+the owner, and fail closed.
 
 It's the **same "structural, not a prompt rule" pattern**, applied to a network
 endpoint — the gate is in code, before the model runs:
 
-- **JWT first (prod).** The channel reuses the *same* `authorization_config`
+- **JWT first (prod).** The server reuses the *same* `authorization_config`
   AgentOS uses for the REST API (passed in from [`app/main.py`](../app/main.py)),
   so the verified `sub` arrives identically — non-forgeable.
 - **Owner check, then 401.** `OwnerOnlyMiddleware` resolves the caller and
   rejects anyone who is not in `OWNER_ID` with **401** — it never falls back to
   the capture-only guest surface. An unauthenticated call, a valid non-owner
   token, and the `__scheduler__` sentinel are all rejected (the human read/act
-  channel is stricter than `is_owner` — the scheduler never calls it). With no
-  owner configured the gate 401s everyone, and the channel doesn't even mount.
-- **Owner identity threaded through.** On success the tool runs
+  path is stricter than `is_owner` — the scheduler never calls it). With no
+  owner configured the gate 401s everyone.
+- **Owner identity threaded through.** On success both tools run
   `context.arun(…, user_id=<canonical owner>)`, so `is_owner` is true and
   `context_tools` hands over the full read/act surface — the owner acts *as* the
   owner. The gated act tool (calendar) still pauses for approval (L6); there's no
   approver over MCP, so it returns a note pointing at the chat UI.
+- **DNS-rebinding protection.** An always-on *local* MCP server is a classic
+  DNS-rebinding target — and in dev there's no JWT, so a rebinding request would
+  otherwise reach the owner surface. So host/origin validation is on
+  (`TransportSecuritySettings`), anchored on localhost (the desktop case needs no
+  config) plus the host from `AGENTOS_URL` (so a deploy / tunnel works). Any other
+  Host is rejected with 421 before the gate even runs.
 
-We deliberately **don't** use AgentOS's built-in `enable_mcp_server`: it ships
-unscopeable session/memory CRUD tools, and its `run_agent` drops `user_id` — a
-call through it would resolve to the *guest* surface. So we mount our own
-one-tool server that keeps the identity. In dev (no JWT) the gate binds to the
-canonical `OWNER_ID`, the same keyless-local-as-owner shortcut used elsewhere —
-dev-only. The deterministic eval `mcp_channel_is_owner_only` proves the gate
-accepts the owner and 401s everyone else, no model in the loop.
+We run our own server (not AgentOS's `enable_mcp_server`) so identity is
+threaded through. In dev (no JWT) the gate binds to the canonical `OWNER_ID`, the
+same keyless-local-as-owner shortcut used elsewhere — dev-only. The deterministic
+eval `mcp_channel_is_owner_only` proves the gate accepts the owner and 401s
+everyone else, no model in the loop.
 
 ---
 

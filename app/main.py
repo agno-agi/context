@@ -14,7 +14,7 @@ from agno.utils.log import log_info, log_warning
 from agents.context import context
 from agents.sources import close_context_providers, setup_context_providers
 from app.identity import owner_configured
-from app.mcp import MCP_PATH, build_context_mcp_app, context_mcp_enabled
+from app.mcp import MCP_PATH, build_context_mcp_app
 from app.schedules import register_schedules
 from app.settings import is_prd, runtime_env
 from db import create_tables, get_postgres_db
@@ -95,7 +95,7 @@ async def lifespan(app):  # type: ignore[no-untyped-def]
 # ---------------------------------------------------------------------------
 # User isolation scopes the OS REST endpoints (sessions / memory / runs) to the
 # verified JWT user. Only takes effect when authorization is on (prod). The
-# owner-only MCP channel reuses this same config for its JWT layer.
+# owner-only MCP server reuses this same config for its JWT layer.
 authorization_config = AuthorizationConfig(user_isolation=True)
 
 agent_os = AgentOS(
@@ -117,36 +117,29 @@ app = agent_os.get_app()
 
 
 # ---------------------------------------------------------------------------
-# Owner-only MCP channel (opt-in via ENABLE_CONTEXT_MCP)
+# Owner-only MCP server
 #
-# A single-tool MCP server (`ask_context`) that runs the context agent as the
-# OWNER, so the owner can read and act through their context from MCP clients
-# (Claude, ChatGPT). Fail-closed and owner-only — guests never reach it (see
-# app/mcp.py and docs/MCP.md). We build our own one-tool server instead of
-# AgentOS's `enable_mcp_server` (kept off), which ships unscopeable tools and
-# drops identity.
+# @context comes with a two-tool MCP server (`ask_context` / `update_context`)
+# which allows the owner to read and act from MCP clients like Claude and ChatGPT.
 # ---------------------------------------------------------------------------
-if context_mcp_enabled():
-    mcp_app = build_context_mcp_app(authorization=is_prd(), authorization_config=authorization_config)
+mcp_app = build_context_mcp_app(authorization=is_prd(), authorization_config=authorization_config)
 
-    # The FastMCP StreamableHTTP session manager must be started, or requests to
-    # /mcp 500. AgentOS combines its own MCP lifespan the same way (agno/os/app.py);
-    # we're mounting after get_app(), so nest the MCP lifespan inside the app's.
-    _base_lifespan = app.router.lifespan_context
+# The FastMCP StreamableHTTP session manager must be started, or requests to /mcp will 500.
+_base_lifespan = app.router.lifespan_context
 
-    @asynccontextmanager
-    async def _lifespan_with_mcp(app):  # type: ignore[no-untyped-def]
-        async with _base_lifespan(app):
-            async with mcp_app.router.lifespan_context(mcp_app):
-                yield
 
-    app.router.lifespan_context = _lifespan_with_mcp
+@asynccontextmanager
+async def _lifespan_with_mcp(app):  # type: ignore[no-untyped-def]
+    async with _base_lifespan(app):
+        async with mcp_app.router.lifespan_context(mcp_app):
+            yield
 
-    # Mounted at root so the public path is exactly MCP_PATH (/mcp), mirroring
-    # AgentOS's own enable_mcp_server mount. The sub-app's only route is /mcp,
-    # and as the last-registered route the mount catches only what nothing else did.
-    app.mount("/", mcp_app)
-    log_info(f"@context: owner-only MCP channel mounted at {MCP_PATH}")
+
+app.router.lifespan_context = _lifespan_with_mcp
+
+# Mounted at root so the public path is exactly MCP_PATH (/mcp).
+app.mount("/", mcp_app)
+log_info(f"@context: owner-only MCP server mounted at {MCP_PATH}")
 
 
 if __name__ == "__main__":

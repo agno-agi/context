@@ -43,10 +43,6 @@ services:
       # to os.agno.com with) — the AgentOS UI sends it as your verified identity.
       OWNER_ID: ${OWNER_ID:-owner@example.com}
       OWNER_NAME: ${OWNER_NAME:-Me}
-      # Owner-only MCP channel (ask_context). Off by default in prod; on for
-      # local dev so you can wire it into Claude/ChatGPT as a connector. In dev
-      # (no JWT) it binds to the canonical OWNER_ID — same shortcut as above.
-      ENABLE_CONTEXT_MCP: ${ENABLE_CONTEXT_MCP:-true}
       DB_HOST: context-db
       DB_PORT: 5432
       DB_USER: ${DB_USER:-context}
