@@ -48,7 +48,8 @@ from dataclasses import dataclass
 from agno.agent import Agent
 from agno.run import RunContext
 
-from agents.context import context, context_tools
+from agents.context import context
+from agents.policy import context_tools
 from app.mcp import _caller_is_owner
 from db import get_postgres_db
 

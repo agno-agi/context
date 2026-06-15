@@ -9,6 +9,7 @@ from os import getenv
 from zoneinfo import ZoneInfo
 
 from agno.models.openai import OpenAIResponses
+from agno.utils.log import log_info, log_warning
 
 
 def default_model() -> OpenAIResponses:
@@ -48,6 +49,29 @@ def runtime_env() -> str:
 def is_prd() -> bool:
     """True unless explicitly running dev — auth and owner checks rely on this."""
     return runtime_env() == "prd"
+
+
+def warn_on_missing_config() -> None:
+    """Log startup warnings for unset config that silently changes behavior.
+
+    Called once from the AgentOS lifespan (app/main.py).
+    """
+    from app.identity import owner_configured  # local import to keep settings load lean
+
+    # Without an OWNER_ID, @context is capture-only for everyone.
+    if is_prd() and not owner_configured():
+        log_warning(
+            "OWNER_ID is not set — no caller will be treated as the owner. "
+            "Context is capture-only for everyone until OWNER_ID is set."
+        )
+    # Without OWNER_TIMEZONE, "today" and relative dates fall back to UTC.
+    if owner_timezone_configured():
+        log_info(f"OWNER_TIMEZONE={owner_timezone()}")
+    else:
+        log_warning(
+            "OWNER_TIMEZONE is not set (or invalid) — 'today', due/overdue math, and relative "
+            "dates use UTC. Set it to your IANA zone (e.g. America/Los_Angeles)."
+        )
 
 
 def _float_env(name: str, default: float) -> float:

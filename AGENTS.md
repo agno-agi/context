@@ -35,12 +35,12 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │
 ├── Schedules (app/schedules.py)                register_schedules() — cron that fires the workflows (hourly sweep; Slack-gated digests)
 │
-├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today / research / knowledge-review
+├── Skills (skills/ + agents/policy.py)         owner-only playbooks  week-plan / daily-rundown / prep-for / process-today / research / knowledge-review
 │
 ├── MCP server (app/mcp.py)                     owner-only `use_context` at /mcp (on by default) — read/act/file via Claude/ChatGPT desktop + CLI
 │
 └── Owner policy (agents/policy.py + app/identity.py)
-    identity-conditioned toolset, pre-hook, tool-hook — all from a verified id
+    the identity-conditioned surface (instructions + toolset) + pre-hook + tool-hook — all from a verified id
 ```
 
 Shared:
@@ -55,22 +55,22 @@ Shared:
 
 | File | Purpose |
 |------|---------|
-| [`app/main.py`](app/main.py) | AgentOS entrypoint — lifespan (create tables + setup/close providers), conditional Slack, JWT gate, `OWNER_ID` warning, owner-only MCP mount. |
+| [`app/main.py`](app/main.py) | AgentOS entrypoint — assembles the `AgentOS` (agents, workflows, interfaces, MCP) and the lifespan (startup checks, thread-pool sizing, create tables, register schedules, setup/close providers). Pure assembly; the steps live in their domain modules. |
 | [`app/identity.py`](app/identity.py) | `OWNER_ID` parsing + `is_owner(run_context)` — the verdict the whole owner/guest model keys off. Fails closed. |
 | [`app/mcp.py`](app/mcp.py) | `context_mcp_config()` — the `MCPServerConfig` handed to `AgentOS(enable_mcp_server=True, mcp_config=…)`. One tool (`use_context`) running the `context` agent as the owner; fail-closed owner gate (`authorize=_caller_is_owner` — JWT then owner check → 401) + DNS-rebinding protection (`allowed_hosts`), so it's never a guest path ([`docs/MCP.md`](docs/MCP.md)). |
-| [`app/settings.py`](app/settings.py) | `default_model()` factory. |
+| [`app/settings.py`](app/settings.py) | Config accessors — `default_model()` factory, `owner_timezone()`, the MCP/provider timeout knobs, and `warn_on_missing_config()` (the startup config warnings). |
 | [`app/config.yaml`](app/config.yaml) | Quick prompts for the `context` agent. |
 | [`app/schedules.py`](app/schedules.py) | `register_schedules()` — the cron registration (idempotent; called from the lifespan): hourly `queue-reminders`, plus the Slack-gated `daily-digest` / `weekly-digest`. Cross-cutting (the scheduler can fire agents *or* workflows), so it lives here, not in `workflows/`. |
-| [`agents/context.py`](agents/context.py) | The `context` Agent — identity-conditioned `tools=` callable, identity-resolved prompt (`caller_information`), defense-in-depth hooks, owner-gated skills. |
-| [`agents/sources.py`](agents/sources.py) | Provider registry — builds/caches providers, async setup/close, `list_contexts`. |
+| [`agents/context.py`](agents/context.py) | The `context` Agent definition — assembled from the identity-conditioned surface + hooks in [`agents/policy.py`](agents/policy.py), the model, persistence, learning, and history config. |
+| [`agents/sources.py`](agents/sources.py) | Provider registry — builds/caches providers, async setup/close, `list_contexts`, the act-tool gate (`gate_act_tools`), and the I/O thread-pool sizing (`size_io_thread_pool`). |
 | [`agents/instructions.py`](agents/instructions.py) | `CONTEXT_INSTRUCTIONS` + the `crm` and `knowledge` read/write sub-agent prompts (`crm` rendered table-aware from the schema spec; `knowledge` specs-aware). |
 | [`agents/inbox.py`](agents/inbox.py) | The inbound queue — `submit_update` (everyone), `rundown` / `acknowledge` (owner-only). |
-| [`agents/policy.py`](agents/policy.py) | Defense-in-depth hooks — `normalize_identity` (pre) + `enforce_capture_only` (tool). |
+| [`agents/policy.py`](agents/policy.py) | Everything decided from the verified identity: the surface (`context_instructions` / `context_tools` — owner gets the full toolset, a guest only `submit_update`), owner-gated skills loading, and the defense-in-depth hooks (`normalize_identity` pre, `enforce_capture_only` tool). |
 | [`workflows/__init__.py`](workflows/__init__.py) | Exports `WORKFLOWS` — the list handed to `AgentOS(workflows=...)` in `app/main.py`. |
 | [`workflows/reminders.py`](workflows/reminders.py) | The reminder sweep — `_queue_reminders` claims due reminders and files them into the inbound queue. Exposed three ways: the `queue_reminders` owner tool (manual, wired onto the agent), the `queue_reminders_step`, and the `queue_reminders_workflow` (run hourly by the schedule, deterministically). Owner-only on every path. |
 | [`workflows/digest.py`](workflows/digest.py) | The scheduled digests — `daily_digest_step` / `weekly_digest_step` (+ the `daily_digest_workflow` / `weekly_digest_workflow` objects) run a read-only playbook (rundown / week-plan) as the owner and DM the result. Auto-arm when `SLACK_BOT_TOKEN` is set. |
 | [`workflows/notify.py`](workflows/notify.py) | `dm_owner()` — the shared, ungated self-notification path (DM the owner on Slack). Used by the reminder sweep and the digests. No-op unless a bot token + owner email are configured. |
-| [`skills/`](skills/) | Runtime skills — owner-only playbooks, one `SKILL.md` per folder (`week-plan`, `daily-rundown`, `prep-for`, `process-today`, `research`, `knowledge-review`). Loaded + owner-gated by `context.py`; the agent uses them via progressive disclosure. |
+| [`skills/`](skills/) | Runtime skills — owner-only playbooks, one `SKILL.md` per folder (`week-plan`, `daily-rundown`, `prep-for`, `process-today`, `research`, `knowledge-review`). Loaded + owner-gated by [`agents/policy.py`](agents/policy.py); the agent uses them via progressive disclosure. |
 | [`.agents/skills/`](.agents/skills/) | Dev-time **coding-agent workflows** (`extend-agent`, `improve-agent`, `eval-and-improve`, `review-and-improve`) — slash commands coding agents run *on this repo*, distinct from the runtime skills above. `.claude/skills` is a committed symlink here — see "Working with coding agents". |
 | [`db/schema.py`](db/schema.py) | Single source for the structured store — `TABLES` renders the DDL (`create_tables()`, run at startup) *and* the agent's table-awareness. |
 | [`db/session.py`](db/session.py) | Two engines (write-guarded + read-only) + `get_postgres_db()` for agno persistence. |
@@ -87,11 +87,11 @@ Shared:
 
 ## The owner/guest security model
 
-This is the heart of the product — read [`docs/SECURITY.md`](docs/SECURITY.md) before touching identity, tools, or the inbound queue. The one thing to internalize: the toolset is chosen **in code, from a verified identity, before the model runs**. [`context_tools()`](agents/context.py) hands the owner the full provider surface and everyone else exactly one context tool — `submit_update` — so a guest never even *sees* a read tool; the boundary is structural, not a prompt rule. `OWNER_ID` lists the identities that count as you (first is canonical); unset ⇒ capture-only for everyone (fail closed). The hooks in [`agents/policy.py`](agents/policy.py) add defense in depth.
+This is the heart of the product — read [`docs/SECURITY.md`](docs/SECURITY.md) before touching identity, tools, or the inbound queue. The one thing to internalize: the toolset is chosen **in code, from a verified identity, before the model runs**. [`context_tools()`](agents/policy.py) hands the owner the full provider surface and everyone else exactly one context tool — `submit_update` — so a guest never even *sees* a read tool; the boundary is structural, not a prompt rule. `OWNER_ID` lists the identities that count as you (first is canonical); unset ⇒ capture-only for everyone (fail closed). The hooks in [`agents/policy.py`](agents/policy.py) add defense in depth.
 
 One deliberate exception rides outside the identity-conditioned toolset: the agent's `learning=LearningMachine(...)` (user profile + user memory, agentic mode) hands **every** caller two learning tools — `update_user_memory` and `update_profile` — so @context remembers the people (and agents) who talk to it. Memories and profile fields are keyed to the caller's own verified `user_id` and surface only on that caller's later runs — a teammate's memories never touch the owner's data, so this adds no read path across the boundary.
 
-Act tools get a second gate on top of the toolset: the tools named in `ACT_TOOLS` ([`agents/sources.py`](agents/sources.py) — just `update_calendar`) are flagged `requires_confirmation` per run in [`context_tools()`](agents/context.py), so the run pauses for the owner's explicit approval before the calendar changes. Two writes are deliberately ungated: `update_gmail` only ever drafts (it never sends — the send tools are stripped from its write toolkit, and a draft is private and reversible), and `update_slack` is ordinary communication, not a sensitive act (still owner-only, since it rides the provider surface). This ungated messaging is what powers the context network (agents messaging each other) — see [`docs/NETWORK.md`](docs/NETWORK.md). When you add a *sensitive* act-on-the-world tool, add it to `ACT_TOOLS` — don't ship one ungated. The full enforcement layers, threat model, and trust roots live in [`docs/SECURITY.md`](docs/SECURITY.md).
+Act tools get a second gate on top of the toolset: the tools named in `ACT_TOOLS` ([`agents/sources.py`](agents/sources.py) — just `update_calendar`) are flagged `requires_confirmation` per run by `gate_act_tools` (called from [`context_tools()`](agents/policy.py)), so the run pauses for the owner's explicit approval before the calendar changes. Two writes are deliberately ungated: `update_gmail` only ever drafts (it never sends — the send tools are stripped from its write toolkit, and a draft is private and reversible), and `update_slack` is ordinary communication, not a sensitive act (still owner-only, since it rides the provider surface). This ungated messaging is what powers the context network (agents messaging each other) — see [`docs/NETWORK.md`](docs/NETWORK.md). When you add a *sensitive* act-on-the-world tool, add it to `ACT_TOOLS` — don't ship one ungated. The full enforcement layers, threat model, and trust roots live in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Development Setup
 
@@ -140,9 +140,9 @@ If a provider needs a model, reuse `default_model()` so the model id stays in on
 
 A "skill" is a reusable **playbook** the owner can invoke — a named, versioned procedure layered over the provider tools (`week-plan`, `daily-rundown`, `prep-for`, `process-today`, `research`, `knowledge-review`). These are *runtime* skills for the `context` agent's owner; don't confuse them with the **coding-agent workflows** in `.agents/skills/`, which drive *coding* agents against this repo.
 
-Drop a folder in [`skills/`](skills/): `skills/<name>/SKILL.md` with YAML frontmatter (`name` must equal the folder name, plus a trigger-rich `description`) and a markdown body that *is* the instructions. Optional `scripts/` and `references/` subdirs are auto-discovered. Agno's `LocalSkills` loader validates on startup (lowercase-hyphenated name, name == dir); the agent then exposes three access tools — `get_skill_instructions` / `get_skill_reference` / `get_skill_script` — with progressive disclosure, so only each skill's name + description sit in the prompt until the model loads one. **No change to `context.py` is needed — it loads every folder in `skills/`.** In dev, adding or editing a `SKILL.md` hot-reloads.
+Drop a folder in [`skills/`](skills/): `skills/<name>/SKILL.md` with YAML frontmatter (`name` must equal the folder name, plus a trigger-rich `description`) and a markdown body that *is* the instructions. Optional `scripts/` and `references/` subdirs are auto-discovered. Agno's `LocalSkills` loader validates on startup (lowercase-hyphenated name, name == dir); the agent then exposes three access tools — `get_skill_instructions` / `get_skill_reference` / `get_skill_script` — with progressive disclosure, so only each skill's name + description sit in the prompt until the model loads one. **No code change is needed — [`agents/policy.py`](agents/policy.py) loads every folder in `skills/`.** In dev, adding or editing a `SKILL.md` hot-reloads.
 
-**Owner-gated by construction.** Skills ride the same identity rails as the rest of the toolset: the access tools are added only in the owner branch of [`context_tools()`](agents/context.py), and the browse snippet only renders in the owner branch of `caller_information` (which also keeps the provider list and routing playbook out of a guest's prompt). A guest's toolset and system prompt carry zero skill references. A malformed `SKILL.md` degrades to "no skills" with a warning rather than taking the app down. See [`docs/SECURITY.md`](docs/SECURITY.md).
+**Owner-gated by construction.** Skills ride the same identity rails as the rest of the toolset: the access tools are added only in the owner branch of [`context_tools()`](agents/policy.py), and the browse snippet only renders in the owner branch of `caller_information` (which also keeps the provider list and routing playbook out of a guest's prompt). A guest's toolset and system prompt carry zero skill references. A malformed `SKILL.md` degrades to "no skills" with a warning rather than taking the app down. See [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ### The structured store
 

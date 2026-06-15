@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import inspect
 import json
+from concurrent.futures import ThreadPoolExecutor
 from os import getenv
 from pathlib import Path
 
@@ -112,6 +113,24 @@ async def _gather_provider_calls(providers: list[ContextProvider], method: str) 
     for provider, outcome in zip(providers, results, strict=True):
         if isinstance(outcome, BaseException):
             log_warning(f"context {provider.id!r} {method} raised {type(outcome).__name__}: {outcome}")
+
+
+def size_io_thread_pool() -> None:
+    """Size asyncio's default thread pool for this registry's I/O-bound fan-out.
+
+    Agno runs every sync provider call (Postgres, Slack, Google) on the loop's default
+    thread pool. Its default is ~6 workers on a 2-vCPU box — too few for a rundown's
+    fan-out, so fast sources queue behind slow ones. Tunable via ``THREAD_POOL_WORKERS``.
+    Call once from the AgentOS lifespan, inside the running loop.
+    """
+    try:
+        workers = int(getenv("THREAD_POOL_WORKERS", "") or 0) or 64
+    except ValueError:
+        workers = 64
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ctx-io")
+    )
+    log_info(f"Default thread pool sized to {workers} workers (I/O-bound provider calls)")
 
 
 async def setup_context_providers() -> list[ContextProvider]:
@@ -510,7 +529,7 @@ def _log_context_providers(ctxs: list[ContextProvider]) -> None:
 def context_providers_summary() -> str:
     """Markdown summary of registered providers, for prompt interpolation.
 
-    Called per run from ``agents.context.caller_information`` (the owner branch),
+    Called per run from ``agents.policy.caller_information`` (the owner branch),
     so the prompt never holds a stale snapshot of the registry.
     """
     providers = get_context_providers()

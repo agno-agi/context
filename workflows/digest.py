@@ -42,7 +42,8 @@ async def _run_playbook(prompt: str) -> str:
     """
     # Imported lazily: agents.context imports across the package, so deferring the
     # import keeps this module cheap to load and avoids any import-order surprise.
-    from agents.context import READ_ONLY_FLAG, context
+    from agents.context import context
+    from agents.policy import READ_ONLY_FLAG
 
     # READ_ONLY_FLAG strips every write tool for this run (see context_tools), so the
     # playbook can read but can't post the brief itself or touch the calendar.

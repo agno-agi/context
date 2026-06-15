@@ -266,7 +266,7 @@ def queue_owner_note(title: str, body: str = "", *, source: str = "system", work
 # ---------------------------------------------------------------------------
 
 # The exact toolset a guest is handed — the guest branch of
-# agents.context.context_tools returns this list.
+# agents.policy.context_tools returns this list.
 GUEST_TOOLS = (submit_update,)
 
 # The allowlist the tool_hook enforces for guest callers: the guest
