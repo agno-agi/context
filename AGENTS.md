@@ -35,7 +35,7 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │
 ├── Schedules (app/schedules.py)                register_schedules() — cron that fires the workflows (hourly sweep; Slack-gated digests)
 │
-├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today
+├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today / research / knowledge-review
 │
 ├── MCP server (app/mcp.py)                     always-on owner-only `use_context` at /mcp — read/act/file via Claude/ChatGPT desktop + CLI
 │
@@ -70,7 +70,7 @@ Shared:
 | [`workflows/reminders.py`](workflows/reminders.py) | The reminder sweep — `_queue_reminders` claims due reminders and files them into the inbound queue. Exposed three ways: the `queue_reminders` owner tool (manual, wired onto the agent), the `queue_reminders_step`, and the `queue_reminders_workflow` (run hourly by the schedule, deterministically). Owner-only on every path. |
 | [`workflows/digest.py`](workflows/digest.py) | The scheduled digests — `daily_digest_step` / `weekly_digest_step` (+ the `daily_digest_workflow` / `weekly_digest_workflow` objects) run a read-only playbook (rundown / week-plan) as the owner and DM the result. Auto-arm when `SLACK_BOT_TOKEN` is set. |
 | [`workflows/notify.py`](workflows/notify.py) | `dm_owner()` — the shared, ungated self-notification path (DM the owner on Slack). Used by the reminder sweep and the digests. No-op unless a bot token + owner email are configured. |
-| [`skills/`](skills/) | Runtime skills — owner-only playbooks, one `SKILL.md` per folder (`week-plan`, `daily-rundown`, `prep-for`, `process-today`). Loaded + owner-gated by `context.py`; the agent uses them via progressive disclosure. |
+| [`skills/`](skills/) | Runtime skills — owner-only playbooks, one `SKILL.md` per folder (`week-plan`, `daily-rundown`, `prep-for`, `process-today`, `research`, `knowledge-review`). Loaded + owner-gated by `context.py`; the agent uses them via progressive disclosure. |
 | [`.agents/skills/`](.agents/skills/) | Dev-time **coding-agent workflows** (`extend-agent`, `improve-agent`, `eval-and-improve`, `review-and-improve`) — slash commands coding agents run *on this repo*, distinct from the runtime skills above. `.claude/skills` is a committed symlink here — see "Working with coding agents". |
 | [`db/schema.py`](db/schema.py) | Single source for the structured store — `TABLES` renders the DDL (`create_tables()`, run at startup) *and* the agent's table-awareness. |
 | [`db/session.py`](db/session.py) | Two engines (write-guarded + read-only) + `get_postgres_db()` for agno persistence. |
@@ -138,7 +138,7 @@ If a provider needs a model, reuse `default_model()` so the model id stays in on
 
 ### Adding a skill (runtime playbook, owner-only)
 
-A "skill" is a reusable **playbook** the owner can invoke — a named, versioned procedure layered over the provider tools (`week-plan`, `daily-rundown`, `prep-for`, `process-today`). These are *runtime* skills for the `context` agent's owner; don't confuse them with the **coding-agent workflows** in `.agents/skills/`, which drive *coding* agents against this repo.
+A "skill" is a reusable **playbook** the owner can invoke — a named, versioned procedure layered over the provider tools (`week-plan`, `daily-rundown`, `prep-for`, `process-today`, `research`, `knowledge-review`). These are *runtime* skills for the `context` agent's owner; don't confuse them with the **coding-agent workflows** in `.agents/skills/`, which drive *coding* agents against this repo.
 
 Drop a folder in [`skills/`](skills/): `skills/<name>/SKILL.md` with YAML frontmatter (`name` must equal the folder name, plus a trigger-rich `description`) and a markdown body that *is* the instructions. Optional `scripts/` and `references/` subdirs are auto-discovered. Agno's `LocalSkills` loader validates on startup (lowercase-hyphenated name, name == dir); the agent then exposes three access tools — `get_skill_instructions` / `get_skill_reference` / `get_skill_script` — with progressive disclosure, so only each skill's name + description sit in the prompt until the model loads one. **No change to `context.py` is needed — it loads every folder in `skills/`.** In dev, adding or editing a `SKILL.md` hot-reloads.
 

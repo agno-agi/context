@@ -14,3 +14,11 @@ manifest:
   queue-reminders:
     description: "Push reminders into your inbound queue."
     labels: ["scheduled", "hourly"]
+
+  daily-digest:
+    description: "Get your daily rundown as a DM in Slack."
+    labels: ["scheduled", "daily"]
+
+  weekly-digest:
+    description: "DM your week-ahead plan to Slack."
+    labels: ["scheduled", "weekly"]
