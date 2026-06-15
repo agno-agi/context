@@ -66,22 +66,33 @@ docker compose up -d --build
 
 Confirm it is live at [http://localhost:8000/docs](http://localhost:8000/docs).
 
+## AgentOS UI
+
+@context runs on AgentOS, which comes with a web UI for managing and monitoring @context. Use the AgentOS UI to chat with @context, view sessions, approve actions and more.
+
+<img width="3066" height="2046" alt="Local Context AgentOS" src="https://github.com/user-attachments/assets/ee4b789a-1612-4b5d-9bd4-37e68ede91c4" />
+
+1. Open [os.agno.com](https://os.agno.com) and sign in with your email (the same one you set as `OWNER_ID`).
+2. Click **Connect AgentOS → Local**.
+3. Enter `http://localhost:8000`, name it "Local Context" and connect.
+4. Click on the chat button under Context.
+5. Try one of the quick prompts.
+
 ## MCP server
 
 The main way to use @context is from an MCP client like Claude Code, Codex, Claude, and ChatGPT. Connect your favorite AI tools to @context's MCP server at `http://localhost:8000/mcp`.
 
 > Note: @context's MCP server is **owner-only**, so keep an eye on security.
 
-### Add @context to every MCP client automatically
+### Add @context to MCP clients automatically
 
-Add @context to **every MCP client on your machine** with one command:
+Add @context to every MCP client on your machine with one command:
 
 ```sh
-# Add @context to every MCP client
 python scripts/connect.py
 ```
 
-The script finds Claude Code, Codex, and the Claude Desktop app, and registers @context with each. It runs `claude mcp add` and `codex mcp add` for the CLIs, and writes an [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge into `claude_desktop_config.json` for the desktop app. Use `--dry-run` to preview and `--remove` to undo.
+The script finds Claude Code, Codex, and the Claude Desktop app, and registers @context with each. Use `--dry-run` to preview and `--remove` to undo.
 
 ### Add @context to MCP clients manually
 
@@ -108,18 +119,6 @@ codex mcp add --url http://localhost:8000/mcp context                       # Co
 
 See [`docs/MCP.md`](docs/MCP.md) for more details.
 
-## AgentOS UI
-
-@context runs on AgentOS, which comes with a web UI for managing and monitoring @context. Use the AgentOS UI to chat with @context, view sessions, approve actions and more.
-
-<img width="3066" height="2046" alt="Local Context AgentOS" src="https://github.com/user-attachments/assets/ee4b789a-1612-4b5d-9bd4-37e68ede91c4" />
-
-1. Open [os.agno.com](https://os.agno.com) and sign in with your email (the same one you set as `OWNER_ID`).
-2. Click **Connect AgentOS → Local**.
-3. Enter `http://localhost:8000`, name it "Local Context" and connect.
-4. Click on the chat button under Context.
-5. Try one of the quick prompts.
-
 ## Slack
 
 Slack is where @context comes alive. It's the interface where I (@ashpreetbedi) use it the most and the interface that allows your team (and their agents) to talk to @context.
@@ -132,15 +131,11 @@ To set it up, you need to:
 
 Read [`docs/SLACK.md`](docs/SLACK.md) for the Slack setup guide.
 
-Notes:
-- Agno's AgentOS automatically sets up the Slack interface when the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` env vars are set.
-- The `resolve_user_identity=True` flag tells the AgentOS to resolve the Slack user identity to an email, which is what `OWNER_ID` matches against to determine the caller's role (owner or guest).
-
 ## @context Knowledge Base
 
-@context comes with a long-term knowledge base that acts as its second brain. @context stores everything from product specs and research notes to "what I know about X" pages in this knowledge base.
+@context comes with a knowledge base that acts as its second brain. @context stores everything from product specs and research notes to "what I know about X" pages in this knowledge base.
 
-The knowledge base is configured as filesystem-backed by default (a gitignored `knowledge/` folder in this repo) but I highly recommend pointing it to a git repo or notion database for production. See [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) for the full guide.
+The knowledge base is stored on the filesystem by default (a gitignored `knowledge/` folder in this repo) but I highly recommend pointing it to a git repo or notion database for production. See [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) for the full guide.
 
 Try:
 - *Write a one-pager on the advantages of building our own agent-platform*
@@ -149,7 +144,7 @@ Try:
 
 ## @context CRM
 
-@context comes with a postgres-backed **CRM** that gives it long-term **structured memory** about people, projects, meetings, reminders, notes and contacts.
+@context comes with a CRM that gives it structured memory about people, projects, meetings, reminders, notes and contacts.
 
 This auto-managing crm is @context's superpower. Use it to manage projects, meetings, reminders, notes, and contacts. @context maps what you tell it onto the right table - no forms, no fields - and can create new tables on demand. Try:
 - *"Add Dana Reyes, Head of Platform at Acme, dana@acme.com - and remind me to send her the integration spec next Tuesday."*

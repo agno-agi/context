@@ -20,5 +20,5 @@ manifest:
     labels: ["scheduled", "daily"]
 
   weekly-digest:
-    description: "DM your week-ahead plan to Slack."
+    description: "Get your week-ahead plan as a DM in Slack."
     labels: ["scheduled", "weekly"]
