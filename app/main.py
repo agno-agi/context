@@ -14,7 +14,7 @@ from agno.utils.log import log_info, log_warning
 from agents.context import context
 from agents.sources import close_context_providers, setup_context_providers
 from app.identity import owner_configured
-from app.mcp import MCP_PATH, build_context_mcp_app
+from app.mcp import context_mcp_config
 from app.schedules import register_schedules
 from app.settings import is_prd, runtime_env
 from db import create_tables, get_postgres_db
@@ -116,34 +116,12 @@ agent_os = AgentOS(
     authorization_config=authorization_config,
     scheduler_base_url=scheduler_base_url,  # The base URL of the scheduler.
     internal_service_token=getenv("INTERNAL_SERVICE_TOKEN") or None,  # The internal service token used by the AgentOS.
+    # Owner-only single-tool MCP server at /mcp — see app/mcp.py.
+    enable_mcp_server=True,
+    mcp_config=context_mcp_config(),
 )
 app = agent_os.get_app()
-
-
-# ---------------------------------------------------------------------------
-# Owner-only MCP server
-#
-# @context comes with a one-tool MCP server (`ask_context`) which allows the
-# owner to read, file, and act from MCP clients like Claude and ChatGPT.
-# ---------------------------------------------------------------------------
-mcp_app = build_context_mcp_app(authorization=is_prd(), authorization_config=authorization_config)
-
-# The FastMCP StreamableHTTP session manager must be started, or requests to /mcp will 500.
-_base_lifespan = app.router.lifespan_context
-
-
-@asynccontextmanager
-async def _lifespan_with_mcp(app):  # type: ignore[no-untyped-def]
-    async with _base_lifespan(app):
-        async with mcp_app.router.lifespan_context(mcp_app):
-            yield
-
-
-app.router.lifespan_context = _lifespan_with_mcp
-
-# Mounted at root so the public path is exactly MCP_PATH (/mcp).
-app.mount("/", mcp_app)
-log_info(f"@context: owner-only MCP server mounted at {MCP_PATH}")
+log_info("@context: owner-only MCP server mounted at /mcp")
 
 
 if __name__ == "__main__":
