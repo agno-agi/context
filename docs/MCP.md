@@ -12,18 +12,21 @@ It's **always on** — not a setting you opt into — and **owner-only**:
 
 It runs the agent as *you*, so remember to never expose this server without security.
 
-## The two tools
+## The tool
 
-Both run the *real* `context` agent ([`app/mcp.py`](../app/mcp.py)) as the owner,
-so they get your full read/write surface. They differ only in *when* the client
-should reach for them:
+`use_context(message, session_id?)` runs the *real* `context` agent
+([`app/mcp.py`](../app/mcp.py)) as the owner — your full read/write/act surface
+behind one call. The agent decides what to do, so the same tool covers:
 
-| Tool | For | Examples |
-|---|---|---|
-| `ask_context(message, session_id?)` | Reading / acting | "what's waiting on me?", "what do we know about Acme?", "draft a reply to Sarah" |
-| `update_context(message, session_id?)` | Filing / updating | "met Sarah from Acme, follow up Friday", "we decided to ship MCP first", "remind me to review the deck tomorrow" |
+- **look things up** — "what's waiting on me?", "what do we know about Acme?",
+  "what's on my calendar this week?"
+- **save / update** — "met Sarah from Acme, follow up Friday", "we decided to
+  ship MCP first", "remind me to review the deck tomorrow"
+- **act** — "draft a reply to Sarah", "tell the team the deck is ready"
 
-`session_id` is optional — pass a stable one to continue a thread.
+One tool, not several: the client gets one obvious door for anything about your
+work, instead of a read-vs-write routing decision. `session_id` is optional —
+pass a stable one to continue a thread.
 
 ## Use it from a desktop app (local, zero setup)
 
@@ -34,8 +37,7 @@ directly. Bring `@context` up locally (`docker compose up -d`) and add a connect
 - **Auth**: none locally (dev runs without JWT; the server binds to you as the
   owner — the same keyless-local-as-owner shortcut the rest of dev uses).
 
-Claude Desktop / ChatGPT desktop will list `ask_context` and `update_context`.
-That's the whole setup.
+Claude Desktop / ChatGPT desktop will list `use_context`. That's the whole setup.
 
 > Localhost only works from an app on the **same machine**. A cloud model
 > (ChatGPT on the web, Claude on the web) runs on a remote server and cannot
@@ -70,8 +72,8 @@ ephemeral and shut it down right after.
 ### ChatGPT specifics
 
 ChatGPT reaches remote MCP servers through **Connectors** and the **Responses
-API** — both public-HTTPS only, same as above. The smoothest path for these two
-tools is the Responses API `mcp` tool: pass `server_url` + `headers:
+API** — both public-HTTPS only, same as above. The smoothest path for this tool
+is the Responses API `mcp` tool: pass `server_url` + `headers:
 {Authorization: "Bearer <JWT>"}`, which works with our static token. The consumer
 connector UI leans on OAuth and tier-gates some features, so the API / developer
 path is the easier one today.
@@ -97,6 +99,6 @@ path is the easier one today.
 
 With the stack up, point a streamable-HTTP MCP client at
 `http://localhost:8000/mcp` (mirroring `cookbook/05_agent_os/mcp_demo/test_client.py`
-in the Agno repo). `list_tools` returns `["ask_context", "update_context"]`;
-`ask_context` with a workspace question comes back citing real files (proof the
-owner toolset is threaded through), and `update_context` files what you tell it.
+in the Agno repo). `list_tools` returns `["use_context"]`; calling it with a
+workspace question comes back citing real files (proof the owner toolset is
+threaded through), and with a statement to remember it files what you tell it.

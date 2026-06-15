@@ -92,7 +92,7 @@ Notes:
 
 ## MCP server
 
-@context ships a two-tool MCP server — `ask_context` (read/act) and `update_context` (file/update) — so you can use it from any MCP client.
+@context ships a one-tool MCP server — `use_context` — so you can use it from any MCP client. Ask it anything, tell it anything to remember, or have it act — it figures out the rest.
 
 Desktop apps (Claude, ChatGPT) and CLI clients (Claude Code, Codex) reach it on localhost with zero setup — point them at `http://localhost:8000/mcp`. The client picks up both tools and uses them on its own; you don't have to call @context by name.
 
@@ -215,7 +215,7 @@ See [`docs/SLACK.md`](docs/SLACK.md#moving-from-local-to-production) for full st
 
 ### The app (`app/`)
 
-@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the always-on owner-only MCP server — two tools (`ask_context` / `update_context`) that let you read, act, and file through @context from the Claude/ChatGPT desktop apps and CLI clients (see below).
+@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the always-on owner-only MCP server — one tool (`use_context`) that lets you read, act, and file through @context from the Claude/ChatGPT desktop apps and CLI clients (see below).
 
 ### The agents (`agents/`)
 
