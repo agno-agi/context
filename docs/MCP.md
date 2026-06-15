@@ -42,7 +42,7 @@ python scripts/connect.py --dry-run  # preview, write nothing
 python scripts/connect.py --remove   # undo
 ```
 
-It detects Claude Code, Codex, and the Claude Desktop app and wires @context into each — running `claude mcp add` / `codex mcp add` for the CLIs and writing an `mcp-remote` bridge into `claude_desktop_config.json` for the desktop app (absolute `npx` path resolved, existing keys preserved, a timestamped backup made, anything already configured skipped). Pure stdlib, so no venv needed. Useful flags: `--clients claude-code codex claude-desktop` to limit the set, `--url` for a non-default endpoint, `--config-path` to point at a non-standard desktop config.
+It detects Claude Code, Codex, and the Claude Desktop app and wires @context into each — running `claude mcp add` / `codex mcp add` for the CLIs and writing an `mcp-remote` bridge into `claude_desktop_config.json` for the desktop app (absolute `npx` path resolved, existing keys preserved, a timestamped backup made, anything already configured skipped). For Claude Code it also **always-allows** the `use_context` tool (adds `mcp__context__use_context` to `permissions.allow` in `~/.claude/settings.json`) so the agent never prompts you before calling it — see [Claude Code (CLI)](#claude-code-cli) below. Pure stdlib, so no venv needed. Useful flags: `--clients claude-code codex claude-desktop` to limit the set, `--url` for a non-default endpoint, `--config-path` to point at a non-standard desktop config.
 
 **`--production`** targets your deployed instance: it reads `AGENTOS_URL` from `.env.production`, derives `https://<your-domain>/mcp`, and threads `Authorization: Bearer <JWT>` into every client for you. The JWT is read from `CONTEXT_MCP_JWT` in `.env.production`, else `--token <JWT>`, else you're prompted — and you **self-issue** that token rather than copying one from os.agno.com (see [Self-issued production token](#self-issued-production-token) below). Claude Code gets the token via `--header`; Codex via `--bearer-token-env-var CONTEXT_JWT` (so it stays out of Codex's config — `export CONTEXT_JWT=<JWT>` in your shell); Claude Desktop via the bridge's `--header`. Switching a client from local to prod? CLI clients match by name, so re-run with `--force`. The full setup — minting the token, what lands where — is in [Self-issued production token](#self-issued-production-token) below; the [README](../README.md#connect-production-context-mcp-server) has the one-command quick-start.
 
@@ -56,6 +56,14 @@ claude mcp list      # context: http://localhost:8000/mcp (HTTP) - ✓ Connected
 ```
 
 **Scope: `user`.** @context is a personal, machine-wide endpoint you want in *every* project, so register it at user scope (`-s user`). The default `local` scope would limit it to the current directory; `project` scope writes a shared `.mcp.json` into the repo, which would push a localhost-only, owner-bound connector onto everyone who clones it — wrong for a personal endpoint. The client then picks up `use_context` and uses it on its own; you rarely have to name @context.
+
+**Always-allow the tool.** `claude mcp add` registers the server but doesn't grant it, so Claude Code prompts you on every call. `scripts/connect.py` adds the permission for you; to do it by hand, drop the tool's rule into `permissions.allow` in `~/.claude/settings.json` (user scope, to match the server registration):
+
+```jsonc
+{ "permissions": { "allow": ["mcp__context__use_context"] } }
+```
+
+This only governs Claude Code's local prompt — the server stays JWT + owner-gated and fail-closed (see [`docs/SECURITY.md`](SECURITY.md) L7), so allow-listing the tool here doesn't widen the production boundary. `python scripts/connect.py --remove` takes the rule back out.
 
 For a deployed instance, add the auth header:
 

@@ -6,7 +6,9 @@
 the desktop apps need a hand-edited config + an `mcp-remote` stdio bridge. This
 script does all of it for you, safely:
 
-  - Claude Code  — runs `claude mcp add -s user --transport http <name> <url>`
+  - Claude Code  — runs `claude mcp add -s user --transport http <name> <url>`,
+                   then always-allows the `use_context` tool in ~/.claude/settings.json
+                   (adds `mcp__<name>__use_context` to permissions.allow) so it never prompts
   - Codex        — runs `codex mcp add --url <url> <name>`
   - Claude Desktop — merges an `mcp-remote` bridge into claude_desktop_config.json
                      (absolute npx path, existing keys preserved, timestamped backup)
@@ -55,6 +57,7 @@ from urllib.parse import urlparse
 
 DEFAULT_URL = "http://localhost:8000/mcp"
 DEFAULT_NAME = "context"
+SERVER_TOOL = "use_context"  # the single tool the server exposes; auto-allowed in Claude Code so it never prompts
 CLIENTS = ("claude-code", "codex", "claude-desktop")
 
 # Production (`--production`): where to find the endpoint + the client's bearer token.
@@ -75,6 +78,16 @@ def claude_desktop_config_path() -> Path:
     if sys.platform.startswith("win"):
         return Path(os.environ.get("APPDATA", home)) / "Claude" / "claude_desktop_config.json"
     return home / ".config" / "Claude" / "claude_desktop_config.json"
+
+
+def claude_code_settings_path() -> Path:
+    """Claude Code's user-scope settings file — where the always-allow rule lives.
+
+    The MCP server is registered with `claude mcp add -s user`, so the matching
+    permission belongs at user scope too (applies wherever you connect, not just
+    this project — and stays out of any committed repo settings).
+    """
+    return Path.home() / ".claude" / "settings.json"
 
 
 def bridge_entry(url: str, npx: str, header: str | None = None) -> dict:
@@ -183,10 +196,13 @@ def connect_cli(
 
     get_cmd = [binary, "mcp", "get", name]
     if client == "claude-code":
-        add_cmd = [binary, "mcp", "add", "-s", "user", "--transport", "http"]
+        # `claude mcp add`'s --header is variadic (<header...>), so it must come
+        # AFTER the positionals — placed before, it swallows name/url as extra
+        # header values ("missing required argument 'name'"). This matches the
+        # CLI's own documented example: `... <name> <url> --header "..."`.
+        add_cmd = [binary, "mcp", "add", "-s", "user", "--transport", "http", name, url]
         if header:
             add_cmd += ["--header", header]
-        add_cmd += [name, url]
     else:
         add_cmd = [binary, "mcp", "add", "--url", url]
         if header:
@@ -219,6 +235,52 @@ def connect_cli(
 
 def _first_line(text: str) -> str:
     return (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+
+
+def allow_claude_code_tool(name: str, *, remove: bool, dry_run: bool) -> tuple[str, str]:
+    """Always-allow the server's `use_context` tool in Claude Code's user settings.
+
+    `claude mcp add` registers the server but doesn't grant it — without this,
+    Claude Code prompts the owner on every call. We add the precise tool rule
+    `mcp__<name>__use_context` to `permissions.allow` in ~/.claude/settings.json
+    so it runs freely. Idempotent, preserves every other setting, and only ever
+    touches `permissions.allow`. `--remove` takes the rule back out.
+
+    (This governs only Claude Code's local prompt; the server stays JWT +
+    owner-gated and fail-closed, so the production boundary is untouched.)
+    """
+    rule = f"mcp__{name}__{SERVER_TOOL}"
+    path = claude_code_settings_path()
+
+    settings: dict = {}
+    if path.exists():
+        try:
+            settings = json.loads(path.read_text() or "{}")
+        except json.JSONDecodeError as exc:
+            return FAIL, f"claude-code: {path} is not valid JSON ({exc}) — allow rule left untouched"
+
+    perms = settings.get("permissions") or {}
+    allow = perms.get("allow") or []
+
+    if remove:
+        if rule not in allow:
+            return SKIP, f"claude-code: no '{rule}' allow rule to remove"
+        if dry_run:
+            return OK, f"claude-code: would remove allow rule '{rule}' from {path}"
+        perms["allow"] = [r for r in allow if r != rule]
+        settings["permissions"] = perms
+        _write_json(path, settings)
+        return OK, f"claude-code: removed allow rule '{rule}'"
+
+    if rule in allow:
+        return SKIP, f"claude-code: '{rule}' already always-allowed ({path})"
+    if dry_run:
+        return OK, f"claude-code: would always-allow '{rule}' in {path}"
+    allow.append(rule)
+    perms["allow"] = allow
+    settings["permissions"] = perms
+    _write_json(path, settings)
+    return OK, f"claude-code: always-allowed '{rule}' (no more prompts)"
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +438,12 @@ def main() -> int:
                     client, url, args.name, header=header, remove=args.remove, dry_run=args.dry_run, force=args.force
                 )
             )
+
+    # Claude Code prompts before each MCP call until the tool is allow-listed, so once the
+    # server is registered, always-allow its `use_context` tool too (only when Claude Code is
+    # actually present — mirrors connect_cli's own skip).
+    if "claude-code" in args.clients and shutil.which("claude"):
+        results.append(allow_claude_code_tool(args.name, remove=args.remove, dry_run=args.dry_run))
 
     for glyph, message in results:
         print(f"  {glyph} {message}")
