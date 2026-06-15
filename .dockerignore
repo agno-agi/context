@@ -29,6 +29,7 @@ aienv*
 # Project-specific
 tmp/
 .claude/
+e2e/
 
 # Google credentials — never bake into an image (prod uses
 # GOOGLE_SERVICE_ACCOUNT_JSON_B64 or a mounted path instead)

@@ -64,6 +64,9 @@ Thumbs.db
 # =========================
 tmp
 
+# Live over-the-wire e2e checks — kept local (run against a live stack).
+e2e/
+
 # The owner's knowledge base — personal context data, never committed.
 # (The filesystem-backed `knowledge` provider writes here; see example.env.)
 knowledge/
