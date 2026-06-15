@@ -72,7 +72,6 @@ def create_context_providers() -> list[ContextProvider]:
             configured.append(provider)
 
     context_providers[:] = configured
-    _log_context_providers(configured)
     return list(context_providers)
 
 
@@ -92,9 +91,15 @@ async def _gather_provider_calls(providers: list[ContextProvider], method: str) 
 
 
 async def setup_context_providers() -> list[ContextProvider]:
-    """Build the registry (if needed) and run async setup on each provider."""
+    """Build the registry (if needed) and run async setup on each provider.
+
+    The provider status block is logged *after* ``asetup`` so it reflects the
+    post-setup state (e.g. a GitBackend knowledge base shows as cloned, not
+    ``clone path does not exist (run setup)`` from a pre-clone snapshot).
+    """
     providers = get_context_providers()
     await _gather_provider_calls(providers, "asetup")
+    _log_context_providers(providers)
     return providers
 
 
