@@ -2,9 +2,7 @@
 
 @context is a self-hosted context manager. It organizes your work context into a private CRM and knowledge base so you can stay on top of things.
 
-It plugs into clients like claude, chatGPT, claude code, and codex, and gives them a source of @context about your work. I use it with claude code to manage product specs.
-
-Connect @context to slack and gmail, and you get a powerful chief of staff with context about everything, available in your favorite AI tools.
+It plugs into clients like claude, chatGPT, claude code, and codex, and gives them a single source of @context about your work. I use it with claude code to manage product specs. Connect @context to slack and gmail, and you get a powerful chief of staff with context about everything.
 
 > Your AI tools are users of context, not competitors.
 
