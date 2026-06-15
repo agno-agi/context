@@ -10,6 +10,10 @@ authors = [{ name = "Agno", email = "hello@agno.com" }]
 dependencies = [
   "agno[os,slack]",
   "fastapi[standard]",
+  # AgentOS's MCP server (enable_mcp_server) imports fastmcp at runtime, but agno
+  # only declares it in its test extra — so @context must depend on it directly.
+  # Pinned <3 because agno 2.6.x targets the fastmcp 2.x API.
+  "fastmcp<3",
   "google-api-python-client",
   "google-auth-httplib2",
   "google-auth-oauthlib",
