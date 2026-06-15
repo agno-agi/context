@@ -79,14 +79,18 @@ described in prose here. So "what do we know about Acme" pulls the stub page
 *and* the contact and any open reminders, then synthesizes — it doesn't answer
 from a single store.
 
-## Storage: filesystem by default, Git for real
+## Storage: filesystem by default, Git for production
 
 Out of the box the knowledge base is **filesystem-backed** — a local `knowledge/`
-folder (gitignored), perfect for trying it out.
+folder (gitignored), perfect for trying it out locally.
 
-The intended production setup is **Git-backed**: point it at a repo — ideally
-your specs repo — and every `update_knowledge` auto-commits and pushes, so the
-**git history *is* the audit trail**.
+**In production, back it with Git.** On a container platform like Railway the
+local folder lives on the container's filesystem, which is ephemeral — it is
+*not* the mounted Postgres volume, so it's wiped on every redeploy. The
+[CRM](CRM.md) persists (it's in Postgres on a volume); the prose knowledge base
+does **not**, unless it's Git-backed. Point it at a repo — ideally your specs
+repo — and every `update_knowledge` auto-commits and pushes, so the **git
+history *is* the audit trail** and nothing is lost across deploys.
 
 | Variable | Default | Purpose |
 |---|---|---|

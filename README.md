@@ -240,6 +240,30 @@ Repoint the `/slack/events` and `/slack/interactions` request URLs to your Railw
 
 See [`docs/SLACK.md`](docs/SLACK.md#moving-from-local-to-production) for full steps.
 
+## Back the knowledge base with Git
+
+In production the knowledge base needs a durable home. By default it's a local `knowledge/` folder, which on a container platform like Railway lives on the container's filesystem — **not** the Postgres volume — so it's wiped on every redeploy. The [CRM](docs/CRM.md) survives (it's in Postgres on a mounted volume); the prose knowledge base does not, unless you back it with Git.
+
+Point it at a Git repo and every `update_knowledge` auto-commits and pushes — the git history becomes the audit trail, and nothing is lost on redeploy.
+
+1. Create a repo for your specs (e.g. `you/your-specs`) — an empty repo is fine.
+2. Mint a GitHub token with push access to it.
+3. Add both to `.env.production`:
+
+   ```sh
+   KNOWLEDGE_REPO_URL=https://github.com/you/your-specs.git
+   KNOWLEDGE_GITHUB_TOKEN=ghp_...
+   # optional: KNOWLEDGE_BRANCH (default: main)
+   ```
+
+4. Sync to Railway:
+
+   ```sh
+   ./scripts/railway/env-sync.sh
+   ```
+
+Set both variables to switch to Git; set neither and it stays on the local folder (set only one and it warns and falls back). See [`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md) for the full guide.
+
 ## Connect Gmail and Calendar
 
 You can connect your Gmail and Calendar to @context to ground the rundown and meeting prep in your real inbox and calendar.
