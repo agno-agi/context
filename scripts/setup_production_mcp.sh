@@ -13,7 +13,7 @@
 #                                    your token (the token itself stays local)
 #      3. connect.py --production   — thread the token into Claude Code, Codex,
 #                                    and Claude Desktop (and always-allow the
-#                                    use_context tool in Claude Code so it never
+#                                    ask_context tool in Claude Code so it never
 #                                    prompts)
 #
 #    Run from the repo root, inside the venv (source .venv/bin/activate).

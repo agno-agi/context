@@ -2,7 +2,7 @@
 Context MCP server
 ======================
 
-@context comes with a one-tool MCP server (`use_context`) which lets the owner
+@context comes with a one-tool MCP server (`ask_context`) which lets the owner
 read, file, and act through @context from MCP clients — Claude Code, Codex, and
 the Claude / ChatGPT desktop apps.
 
@@ -13,9 +13,9 @@ need a public HTTPS URL — a deploy or an ngrok tunnel (see docs/MCP.md).
 
 The @context mcp server exposes one tool:
 
-- `use_context(message, session_id?)`
+- `ask_context(message, session_id?)`
 
-One tool, not several: `use_context` runs the real context agent as the owner,
+One tool, not several: `ask_context` runs the real context agent as the owner,
 which reads, files, and acts on its own — so the client has one obvious door for
 anything about the owner's work, rather than a read-vs-write routing decision.
 """
@@ -42,15 +42,22 @@ from app.settings import is_prd
 # the public path (https://<host>/mcp).
 MCP_PATH = "/mcp"
 
-USE_CONTEXT_DESCRIPTION = (
-    "Your personal context agent — it holds the owner's work life. Use it to "
-    "look things up (what's on my plate, what we know about a person / company / "
-    "project, my schedule, my inbox), to save or update anything worth remembering "
-    "(notes, decisions, contacts, reminders, status), and to act (draft a reply, "
-    "message someone, propose a calendar change). Reach for it whenever the user "
-    "asks about their work, people, or plans — or mentions something worth keeping. "
-    "Pass a natural-language request; optionally pass session_id to continue a "
-    "thread. Owner-only."
+ASK_CONTEXT_DESCRIPTION = (
+    "The owner's work brain and first stop for anything about their work life. "
+    "Always try this before Gmail, Calendar, Drive, Slack, Linear, or a past-chat "
+    "search when the question is about the owner's projects, people, companies, "
+    "schedule, inbox, decisions, or priorities. It sits on top of those sources "
+    "and returns one synthesized, cross-source answer instead of raw results.\n\n"
+    'Three modes. (1) Look up: "what\'s on my plate," "where are we with X," '
+    '"what do we know about this person or company," "what\'s on my calendar," '
+    '"anything urgent in my inbox." (2) Remember: save or update notes, decisions, '
+    "contacts, reminders, status, and preferences. Call this whenever the owner "
+    "states something worth keeping, even in passing. (3) Act: draft an email reply, "
+    "propose a calendar change, or send a Slack message. Email and calendar come "
+    "back as a draft or proposal for the owner's approval and never go out on their "
+    "own; a Slack message is ordinary communication and goes out directly.\n\n"
+    "Pass a natural-language request. Pass session_id to continue an existing "
+    "thread. Owner-only. Do not use for general knowledge or anyone else's data."
 )
 
 
@@ -134,7 +141,7 @@ class OwnerOnlyMiddleware(BaseHTTPMiddleware):
 async def _run_as_owner(ctx: Context, message: str, session_id: str | None) -> str:
     """Run the real context agent as the owner and return its reply.
 
-    The body of `use_context` — the caller gets the owner's full read/write/act
+    The body of `ask_context` — the caller gets the owner's full read/write/act
     surface; the agent decides what to do with the message.
     """
     request: Request | None = getattr(getattr(ctx, "request_context", None), "request", None)
@@ -172,13 +179,24 @@ def build_context_mcp_app(
     # dropping the handler(s) it adds to root — leaving any pre-existing root
     # handlers untouched — so the rest of the app keeps its own logging.
     _root_handlers_before = logging.root.handlers[:]
-    server = FastMCP(name="context", transport_security=_mcp_transport_security())
+    # stateless_http=True: each request is self-contained — no in-memory session
+    # map to invalidate, so a redeploy/restart (or a second replica) never 404s a
+    # client holding a session id from before. `ask_context` is request/response
+    # and the agent thread rides the `session_id` arg into Postgres, not the MCP
+    # transport, so there's nothing to lose by dropping transport sessions. Left
+    # json_response at its SSE default so a slow agent run keeps the connection
+    # warm (no proxy idle-timeout) instead of blocking on one JSON response.
+    server = FastMCP(
+        name="context",
+        stateless_http=True,
+        transport_security=_mcp_transport_security(),
+    )
     for handler in logging.root.handlers[:]:
         if handler not in _root_handlers_before:
             logging.root.removeHandler(handler)
 
-    @server.tool(name="use_context", description=USE_CONTEXT_DESCRIPTION)
-    async def use_context(message: str, ctx: Context, session_id: str | None = None) -> str:
+    @server.tool(name="ask_context", description=ASK_CONTEXT_DESCRIPTION)
+    async def ask_context(message: str, ctx: Context, session_id: str | None = None) -> str:
         return await _run_as_owner(ctx, message, session_id)
 
     mcp_app = server.streamable_http_app()

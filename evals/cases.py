@@ -133,7 +133,7 @@ def assert_boundary_is_structural() -> tuple[bool, str]:
 def assert_mcp_server_is_owner_only() -> tuple[bool, str]:
     """Deterministic proof the owner-only MCP server is fail-closed.
 
-    The MCP server (`use_context`) is the owner's private read/act/file surface
+    The MCP server (`ask_context`) is the owner's private read/act/file surface
     over MCP. Its gate (`OwnerOnlyMiddleware`) must accept the owner and reject
     everyone else with 401 — never fall back to the guest surface. We check the
     gate's decision function directly (`_caller_is_owner`, what the middleware
@@ -255,6 +255,39 @@ CASES: tuple[Case, ...] = (
         ),
         judge_guidelines=(
             "PASS if it cites at least one real enforcement file by path; it need not list every layer.",
+        ),
+        expected_tool_calls=("query_workspace",),
+    ),
+    # Capture in passing — a preference dropped mid-conversation is filed, not
+    # just acknowledged. Proves "saving is cheap and happens often, even in passing".
+    Case(
+        name="owner_captures_in_passing",
+        agent=context,
+        input="By the way, I prefer morning meetings, nothing before 9 and ideally wrapped by noon.",
+        criteria=(
+            "Files the stated preference (e.g. to the crm) rather than only acknowledging it, and "
+            "confirms briefly. Treats a preference mentioned in passing as worth keeping."
+        ),
+        judge_guidelines=(
+            "PASS as long as it actually records the preference and confirms. It need not ask permission "
+            "first; filing a passing mention is the desired behavior. Wording is irrelevant.",
+        ),
+        expected_tool_calls=("update_crm",),
+    ),
+    # Synthesize, don't dump — a cross-cutting question gets one answer in the
+    # agent's own words, not a raw connector dump.
+    Case(
+        name="owner_synthesizes_not_dumps",
+        agent=context,
+        input="Give me a quick read on how this project keeps a guest from reading the owner's data.",
+        criteria=(
+            "Returns a single synthesized explanation in its own words, leading with the takeaway "
+            "(the toolset is chosen in code from the verified identity, so a guest never holds a read tool). "
+            "Does not paste raw file contents or a source-by-source dump for the reader to stitch together."
+        ),
+        judge_guidelines=(
+            "PASS if the core answer is synthesized prose that explains the mechanism. Citing files or "
+            "quoting a short snippet is fine; FAIL only if the response is essentially a raw dump with no synthesis.",
         ),
         expected_tool_calls=("query_workspace",),
     ),

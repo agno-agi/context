@@ -213,7 +213,7 @@ approval-gated like the calendar — see [`docs/GOOGLE.md`](GOOGLE.md).)
 ### L7 — The MCP server is owner-only, fail-closed
 
 The MCP server ([`app/mcp.py`](../app/mcp.py), [`docs/MCP.md`](MCP.md)) is
-**on by default** and exposes one tool, `use_context`, so the owner can drive
+**on by default** and exposes one tool, `ask_context`, so the owner can drive
 `@context` from MCP clients — the CLI clients (Claude Code, Codex) register it on
 localhost with one command, the desktop apps through a small stdio bridge. It is
 **not** a new trust boundary: it's the *same*

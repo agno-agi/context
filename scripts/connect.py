@@ -2,13 +2,13 @@
 """
 @context MCP connector — add @context to your local MCP clients in one command.
 
-@context's MCP server (`use_context`) is one command to add to a CLI client, but
+@context's MCP server (`ask_context`) is one command to add to a CLI client, but
 the desktop apps need a hand-edited config + an `mcp-remote` stdio bridge. This
 script does all of it for you, safely:
 
   - Claude Code  — runs `claude mcp add -s user --transport http <name> <url>`,
-                   then always-allows the `use_context` tool in ~/.claude/settings.json
-                   (adds `mcp__<name>__use_context` to permissions.allow) so it never prompts
+                   then always-allows the `ask_context` tool in ~/.claude/settings.json
+                   (adds `mcp__<name>__ask_context` to permissions.allow) so it never prompts
   - Codex        — runs `codex mcp add --url <url> <name>`
   - Claude Desktop — merges an `mcp-remote` bridge into claude_desktop_config.json
                      (absolute npx path, existing keys preserved, timestamped backup)
@@ -57,7 +57,7 @@ from urllib.parse import urlparse
 
 DEFAULT_URL = "http://localhost:8000/mcp"
 DEFAULT_NAME = "context"
-SERVER_TOOL = "use_context"  # the single tool the server exposes; auto-allowed in Claude Code so it never prompts
+SERVER_TOOL = "ask_context"  # the single tool the server exposes; auto-allowed in Claude Code so it never prompts
 CLIENTS = ("claude-code", "codex", "claude-desktop")
 
 # Production (`--production`): where to find the endpoint + the client's bearer token.
@@ -238,11 +238,11 @@ def _first_line(text: str) -> str:
 
 
 def allow_claude_code_tool(name: str, *, remove: bool, dry_run: bool) -> tuple[str, str]:
-    """Always-allow the server's `use_context` tool in Claude Code's user settings.
+    """Always-allow the server's `ask_context` tool in Claude Code's user settings.
 
     `claude mcp add` registers the server but doesn't grant it — without this,
     Claude Code prompts the owner on every call. We add the precise tool rule
-    `mcp__<name>__use_context` to `permissions.allow` in ~/.claude/settings.json
+    `mcp__<name>__ask_context` to `permissions.allow` in ~/.claude/settings.json
     so it runs freely. Idempotent, preserves every other setting, and only ever
     touches `permissions.allow`. `--remove` takes the rule back out.
 
@@ -440,7 +440,7 @@ def main() -> int:
             )
 
     # Claude Code prompts before each MCP call until the tool is allow-listed, so once the
-    # server is registered, always-allow its `use_context` tool too (only when Claude Code is
+    # server is registered, always-allow its `ask_context` tool too (only when Claude Code is
     # actually present — mirrors connect_cli's own skip).
     if "claude-code" in args.clients and shutil.which("claude"):
         results.append(allow_claude_code_tool(args.name, remove=args.remove, dry_run=args.dry_run))

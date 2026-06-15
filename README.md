@@ -302,7 +302,7 @@ See [`docs/GOOGLE.md`](docs/GOOGLE.md) for more details.
 
 ### The app (`app/`)
 
-@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the owner-only MCP server — one tool (`use_context`) that lets you read, act, and file through @context from the Claude/ChatGPT desktop apps and CLI clients (see [MCP server](#mcp-server)).
+@context is a FastAPI application running the AgentOS runtime. [`app/main.py`](app/main.py) is the entrypoint and [`app/settings.py`](app/settings.py) holds shared settings. [`app/identity.py`](app/identity.py) is where identity is validated. It looks dense, but all it does is check whether `user_id` is in the `OWNER_ID` list (comma-separated). [`app/mcp.py`](app/mcp.py) is the owner-only MCP server — one tool (`ask_context`) that lets you read, act, and file through @context from the Claude/ChatGPT desktop apps and CLI clients (see [MCP server](#mcp-server)).
 
 ### The agents (`agents/`)
 
