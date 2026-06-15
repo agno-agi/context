@@ -26,7 +26,7 @@ curl -sS --max-time 10 -o /dev/null -w '%{http_code}\n' \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
-# 200 = up. (421 means the Host header isn't on the allowlist — see "How it's secured".)
+# 200 = up. (400 means the Host header isn't on the allowlist — see "How it's secured".)
 ```
 
 Local dev runs without JWT, so any client on this machine that reaches `http://localhost:8000/mcp` is treated as **you, the owner** — the keyless-local-as-owner shortcut the rest of dev uses ([`app/mcp.py`](../app/mcp.py), `_resolve_caller_id`). That's the point locally, and the reason you don't expose a dev instance: anything on your machine that can reach the port gets your surface.
@@ -165,8 +165,8 @@ python scripts/connect.py --production   # thread CONTEXT_MCP_JWT into your MCP 
 
 ## How it's secured
 
-- **Owner-only, in code.** In prod the same JWT middleware AgentOS uses validates the token, then `OwnerOnlyMiddleware` 401s anyone who isn't in `OWNER_ID` — it never falls back to the guest surface. An unauthenticated call, a valid non-owner token, and the scheduler sentinel are all rejected. (Details: [`SECURITY.md`](SECURITY.md) L7.)
-- **DNS-rebinding protection** is on, because an always-on local server is exactly what it protects. The Host allowlist is anchored on localhost (so the desktop/CLI case needs no config) plus the host from `AGENTOS_URL` (so a deploy or tunnel works — point `AGENTOS_URL` at that domain). A request with any other Host is rejected with **421** (verified locally).
+- **Owner-only, in code.** In prod the same JWT middleware AgentOS uses validates the token, then the `authorize` gate (`MCPServerConfig.authorize=_caller_is_owner`) 401s anyone who isn't in `OWNER_ID` — it never falls back to the guest surface. An unauthenticated call, a valid non-owner token, and the scheduler sentinel are all rejected. (Details: [`SECURITY.md`](SECURITY.md) L7.)
+- **DNS-rebinding protection** is on (`MCPServerConfig.allowed_hosts`), because an always-on local server is exactly what it protects. The Host allowlist is anchored on localhost (so the desktop/CLI case needs no config) plus the host from `AGENTOS_URL` (so a deploy or tunnel works — point `AGENTOS_URL` at that domain). A request with any other Host is rejected with **400** (verified locally).
 - **Acting.** Reads, drafting email, Slack messages, and filing all run to completion. The one approval-gated act tool — `update_calendar` — still pauses for approval, and there's no approval affordance over MCP, so the tool returns a note telling you to approve it in the AgentOS chat UI and ask it to continue.
 
 ## Verifying it runs as the owner

@@ -134,12 +134,15 @@ def assert_mcp_server_is_owner_only() -> tuple[bool, str]:
     """Deterministic proof the owner-only MCP server is fail-closed.
 
     The MCP server (`ask_context`) is the owner's private read/act/file surface
-    over MCP. Its gate (`OwnerOnlyMiddleware`) must accept the owner and reject
-    everyone else with 401 — never fall back to the guest surface. We check the
-    gate's decision function directly (`_caller_is_owner`, what the middleware
-    401s on): the owner is accepted and resolves to the *owner* toolset; a guest,
-    an unauthenticated caller (no `sub`), and the scheduler sentinel are all
-    rejected. No model, no tokens.
+    over MCP. Its gate (`MCPServerConfig.authorize=_caller_is_owner`, run by
+    AgentOS after JWT) must accept the owner and reject everyone else with 401 —
+    never fall back to the guest surface. We check that gate's decision function
+    directly (`_caller_is_owner`): the owner is accepted and resolves to the
+    *owner* toolset; a guest, an unauthenticated caller (no `sub`), and the
+    scheduler sentinel are all rejected. The unauthenticated → reject check
+    reflects prod semantics (the runner leaves `RUNTIME_ENV` at its `prd`
+    default); in dev the keyless-local-as-owner shortcut accepts a missing `sub`,
+    guarded by the `allowed_hosts` DNS-rebinding check. No model, no tokens.
     """
     problems: list[str] = []
 

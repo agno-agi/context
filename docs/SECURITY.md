@@ -227,29 +227,35 @@ endpoint — the gate is in code, before the model runs:
 - **JWT first (prod).** The server reuses the *same* `authorization_config`
   AgentOS uses for the REST API (passed in from [`app/main.py`](../app/main.py)),
   so the verified `sub` arrives identically — non-forgeable.
-- **Owner check, then 401.** `OwnerOnlyMiddleware` resolves the caller and
-  rejects anyone who is not in `OWNER_ID` with **401** — it never falls back to
-  the capture-only guest surface. An unauthenticated call, a valid non-owner
-  token, and the `__scheduler__` sentinel are all rejected (the human read/act
-  path is stricter than `is_owner` — the scheduler never calls it). With no
-  owner configured the gate 401s everyone.
-- **Owner identity threaded through.** On success the tool runs
-  `context.arun(…, user_id=<canonical owner>)`, so `is_owner` is true and
-  `context_tools` hands over the full read/act surface — the owner acts *as* the
-  owner. The gated act tool (calendar) still pauses for approval (L6); there's no
-  approver over MCP, so it returns a note pointing at the chat UI.
+- **Owner check, then 401.** The `authorize=_caller_is_owner` gate
+  (`MCPServerConfig`, run by AgentOS after JWT verification) rejects anyone who
+  is not in `OWNER_ID` with **401** — it never falls back to the capture-only
+  guest surface. An unauthenticated call, a valid non-owner token, and the
+  `__scheduler__` sentinel are all rejected (the human read/act path is stricter
+  than `is_owner` — the scheduler never calls it). With no owner configured the
+  gate 401s everyone.
+- **Owner identity threaded through.** AgentOS injects the verified JWT `sub`
+  as the tool's `user_id` and hides it from the client-facing schema, so a caller
+  can never supply or spoof it; `ask_context` re-checks it (`_caller_is_owner`)
+  as defense in depth, then runs `context.arun(…, user_id=<canonical owner>)`, so
+  `is_owner` is true and `context_tools` hands over the full read/act surface —
+  the owner acts *as* the owner. The gated act tool (calendar) still pauses for
+  approval (L6); there's no approver over MCP, so it returns a note pointing at
+  the chat UI.
 - **DNS-rebinding protection.** An always-on *local* MCP server is a classic
   DNS-rebinding target — and in dev there's no JWT, so a rebinding request would
   otherwise reach the owner surface. So host/origin validation is on
-  (`TransportSecuritySettings`), anchored on localhost (the desktop case needs no
-  config) plus the host from `AGENTOS_URL` (so a deploy / tunnel works). Any other
-  Host is rejected with 421 before the gate even runs.
+  (`MCPServerConfig.allowed_hosts`), anchored on localhost (the desktop case needs
+  no config) plus the host from `AGENTOS_URL` (so a deploy / tunnel works). Any
+  other Host is rejected with 400 before the gate even runs.
 
-We run our own server (not AgentOS's `enable_mcp_server`) so identity is
-threaded through. In dev (no JWT) the gate binds to the canonical `OWNER_ID`, the
-same keyless-local-as-owner shortcut used elsewhere — dev-only. The deterministic
-eval `mcp_server_is_owner_only` proves the gate accepts the owner and 401s
-everyone else, no model in the loop.
+We use AgentOS's native MCP server (`enable_mcp_server=True`,
+`mcp_config=context_mcp_config()`) — the owner gate, DNS-rebinding protection, and
+`user_id` injection are all configured on the `MCPServerConfig`, so there's no
+custom middleware to maintain. In dev (no JWT) the gate binds to the canonical
+`OWNER_ID`, the same keyless-local-as-owner shortcut used elsewhere — dev-only.
+The deterministic eval `mcp_server_is_owner_only` proves the gate accepts the
+owner and 401s everyone else, no model in the loop.
 
 ---
 
