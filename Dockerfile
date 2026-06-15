@@ -17,12 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 ENV PYTHONPATH=/app
 COPY requirements.txt ./
-# `uv pip sync` is strict: it installs exactly the listed packages and drops
-# transitive deps that aren't pinned. Fine for a locked file generated against
-# the released agno, but PR #8404 pulls in a different fastmcp version whose
-# transitive deps aren't in the lock. `uv pip install` is lenient and pulls
-# them in. Revert to `sync` once requirements.txt is regenerated.
-RUN uv pip install -r requirements.txt --system
+RUN uv pip sync requirements.txt --system
 COPY . .
 
 # ---------------------------------------------------------------------------
