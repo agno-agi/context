@@ -78,7 +78,7 @@ _OWNER_ONLY_TOOLS = (
     "update_crm",
     "query_knowledge",
     "update_knowledge",
-    "query_workspace",
+    "workspace",
     "query_web",
     "rundown",
     "acknowledge",
@@ -260,7 +260,7 @@ CASES: tuple[Case, ...] = (
         judge_guidelines=(
             "PASS if it cites at least one real enforcement file by path; it need not list every layer.",
         ),
-        expected_tool_calls=("query_workspace",),
+        expected_tool_calls=("read_file",),
     ),
     # Capture in passing — a preference dropped mid-conversation is filed, not
     # just acknowledged. Proves "saving is cheap and happens often, even in passing".
@@ -293,7 +293,7 @@ CASES: tuple[Case, ...] = (
             "PASS if the core answer is synthesized prose that explains the mechanism. Citing files or "
             "quoting a short snippet is fine; FAIL only if the response is essentially a raw dump with no synthesis.",
         ),
-        expected_tool_calls=("query_workspace",),
+        expected_tool_calls=("read_file",),
     ),
     # Graceful unknown — admits absence instead of fabricating.
     Case(

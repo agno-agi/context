@@ -18,6 +18,7 @@ from os import getenv
 from pathlib import Path
 
 from agno.context.database import DatabaseContextProvider
+from agno.context.mode import ContextMode
 from agno.context.provider import ContextProvider
 from agno.context.slack import SlackContextProvider
 from agno.context.web.parallel import ParallelBackend
@@ -38,7 +39,6 @@ from agents.instructions import (
     KNOWLEDGE_READ,
     KNOWLEDGE_WRITE,
     SLACK_READ,
-    WORKSPACE_READ,
 )
 from app.settings import backbone_query_timeout, default_model, provider_query_timeout
 from db import SCHEMA, get_readonly_engine, get_sql_engine
@@ -165,15 +165,22 @@ def _create_web_provider() -> WebContextProvider:
 
 
 def _create_workspace_provider() -> WorkspaceContextProvider:
+    # mode=tools exposes the read tools (list_files / search_content / read_file)
+    # straight to the main context agent instead of behind a nested sub-agent, so a
+    # codebase question is answered in the agent's own turn (one pass, bounded by its
+    # tool_call_limit) rather than paying a full sub-agent round-trip per file read.
+    # The usage guidance lives in OWNER_GUIDE (the agent never sees provider
+    # instructions); no per-source time-box is needed (see BACKBONE_SOURCES).
+    #
     # agno's defaults already exclude .env*, .git, caches, etc. Also keep Google
     # credential files out: in local dev compose mounts the repo at /app, so
     # without this the owner's own agent could read the minted OAuth token (or a
-    # stray key file) back through query_workspace. (The image is clean —
-    # .dockerignore excludes them — this covers the mounted-dev case.)
+    # stray key file) back through read_file. (The image is clean — .dockerignore
+    # excludes them — this covers the mounted-dev case.)
     return WorkspaceContextProvider(
         root=REPO_ROOT,
         model=default_model(),
-        instructions=WORKSPACE_READ,  # one focused pass, cite paths — see WORKSPACE_READ
+        mode=ContextMode.tools,
         exclude_patterns=[*DEFAULT_EXCLUDE_PATTERNS, "*_token.json", "google-service-account.json"],
     )
 
@@ -477,13 +484,11 @@ def _google_token_precheck(provider_id: str):
     return _precheck
 
 
-# Sources whose reads need a longer per-source budget than the fast best-effort cap
-# (see backbone_query_timeout), so they reliably land instead of being cut off mid-read:
-# the CRM (the rundown's spine, a structured query) and the workspace (a codebase
-# question is list_files + a couple of file reads, which a tight cap can't fit — its
-# read count is bounded instead by WORKSPACE_READ). Best-effort sources still skip fast;
+# Backbone read sources — the brief's spine. They get a longer per-source budget
+# than best-effort sources (see backbone_query_timeout) so they reliably land in the
+# concurrent fan-out, where best-effort sources still skip fast. Just the CRM today;
 # the inbound queue (`rundown`) isn't a query_* sub-agent, so it isn't time-boxed.
-BACKBONE_SOURCES: frozenset[str] = frozenset({"crm", "workspace"})
+BACKBONE_SOURCES: frozenset[str] = frozenset({"crm"})
 
 
 def owner_provider_tools() -> list:

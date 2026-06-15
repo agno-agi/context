@@ -38,8 +38,9 @@ nothing leaves.
    internal sweep already answers it.
 4. **Read the codebase when the topic is framework-related.** If the question
    touches how @context is built or how Agno does something (a toolkit, a
-   provider, the scheduler, AgentOS), `query_workspace` to see how this repo uses
-   it, and `query_web` for anything the code doesn't answer.
+   provider, the scheduler, AgentOS), read the repo's files (`list_files`,
+   `read_file`) to see how it uses it, and `query_web` for anything the code
+   doesn't answer.
 5. **Synthesize a clear, sourced brief.** Lead with the answer. Attribute every
    claim to where it came from, and keep web background visibly separate from our
    own record: tag lines `(from web)`, `(on file)`, or `(auto-summarized,
