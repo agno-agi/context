@@ -9,114 +9,20 @@ from pathlib import Path
 
 from agno.os import AgentOS
 from agno.os.config import AuthorizationConfig
-from agno.scheduler import ScheduleManager
 from agno.utils.log import log_info, log_warning
-from agno.workflow.step import Step
-from agno.workflow.workflow import Workflow
 
 from agents.context import context
-from agents.digest import daily_digest_step, weekly_digest_step
-from agents.reminders import queue_reminders_step
 from agents.sources import close_context_providers, setup_context_providers
 from app.identity import owner_configured
 from app.mcp import MCP_PATH, build_context_mcp_app, context_mcp_enabled
+from app.schedules import register_schedules
 from app.settings import is_prd, runtime_env
 from db import create_tables, get_postgres_db
+from workflows import WORKFLOWS
 
-# One database handle, shared by AgentOS persistence and the scheduler.
+# One database handle for AgentOS persistence. (The scheduler and each workflow
+# open their own handle to the same Postgres — see app/schedules.py and workflows/.)
 db = get_postgres_db()
-
-# The reminder sweep as a one-step workflow. The hourly `queue-reminders`
-# schedule triggers it at /workflows/queue-reminders/runs, so the sweep fires
-# deterministically — no model deciding whether to call a tool. The step
-# re-checks is_owner (see agents/reminders.py).
-queue_reminders_workflow = Workflow(
-    id="queue-reminders",
-    name="Queue Reminders",
-    description="Push due reminders into the owner's inbound queue.",
-    db=db,
-    # Agno injects run_context into the step by name at runtime, but Step.executor's
-    # type only declares the single-arg (StepInput) form — hence the narrow ignore.
-    steps=[Step(name="queue-reminders", executor=queue_reminders_step)],  # type: ignore[arg-type]
-)
-
-# The scheduled digests: the owner's read-only playbooks (daily rundown, weekly
-# week-plan) run on a schedule and DM'd to Slack. Each is a one-step workflow that
-# runs the playbook as the owner and self-DMs the result (see agents/digest.py).
-# Registered only when Slack is configured (see register_schedules).
-daily_digest_workflow = Workflow(
-    id="daily-digest",
-    name="Daily Digest",
-    description="Run the daily rundown and DM it to the owner on Slack.",
-    db=db,
-    steps=[Step(name="daily-digest", executor=daily_digest_step)],  # type: ignore[arg-type]
-)
-
-weekly_digest_workflow = Workflow(
-    id="weekly-digest",
-    name="Weekly Digest",
-    description="Run the week-plan and DM it to the owner on Slack.",
-    db=db,
-    steps=[Step(name="weekly-digest", executor=weekly_digest_step)],  # type: ignore[arg-type]
-)
-
-
-def register_schedules() -> None:
-    """Register @context's background schedules (idempotent — safe on every boot).
-
-    The scheduler poller (`scheduler=True`) fires each due job against an HTTP
-    endpoint; AgentOS authenticates those triggers with the internal service
-    token, so the runs arrive as the `__scheduler__` identity that `is_owner`
-    honors — i.e. on the owner surface. A failure here must not take startup
-    down, so it degrades to a warning.
-
-    - queue-reminders: hourly, the schedule hits the `queue-reminders` workflow
-      (`/workflows/queue-reminders/runs`), whose one step calls `_queue_reminders`
-      and sweeps `crm.reminders` for anything now due into the inbound queue
-      (see `agents/reminders.py`). It's a workflow, not an agent run, so the
-      sweep fires deterministically — no model deciding whether to call a tool.
-
-    - daily-digest / weekly-digest: registered **only when Slack is configured**
-      (delivery is a Slack DM, so there's no point arming them otherwise). Each
-      hits its digest workflow, which runs a read-only playbook as the owner and
-      DMs the result (see `agents/digest.py`). Cron is tunable via
-      `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC); defaults are a weekday-
-      morning rundown and a Sunday-evening week-plan.
-    """
-    try:
-        manager = ScheduleManager(db)
-        manager.create(
-            name="queue-reminders",
-            cron="0 * * * *",  # hourly, on the hour (UTC)
-            endpoint="/workflows/queue-reminders/runs",
-            payload={"message": "Hourly sweep: queue reminders that have come due."},
-            description="Hourly: push due reminders into the owner's inbound queue.",
-            if_exists="update",
-        )
-        log_info("@context: registered schedule 'queue-reminders'")
-
-        # "If the Slack thing is active, the schedule comes on." The digests
-        # deliver over Slack DM, so they only make sense with a bot token set.
-        if getenv("SLACK_BOT_TOKEN"):
-            manager.create(
-                name="daily-digest",
-                cron=getenv("DAILY_DIGEST_CRON", "0 13 * * *"),  # 13:00 UTC daily
-                endpoint="/workflows/daily-digest/runs",
-                payload={"message": "Scheduled daily rundown digest."},
-                description="Daily: DM the owner their rundown on Slack.",
-                if_exists="update",
-            )
-            manager.create(
-                name="weekly-digest",
-                cron=getenv("WEEKLY_DIGEST_CRON", "0 22 * * 0"),  # Sun 22:00 UTC
-                endpoint="/workflows/weekly-digest/runs",
-                payload={"message": "Scheduled weekly plan digest."},
-                description="Weekly: DM the owner their week-plan on Slack.",
-                if_exists="update",
-            )
-            log_info("@context: registered schedules 'daily-digest', 'weekly-digest' (Slack active)")
-    except Exception as exc:
-        log_warning(f"@context: could not register schedules: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +104,7 @@ agent_os = AgentOS(
     lifespan=lifespan,
     db=db,
     agents=[context],
-    workflows=[queue_reminders_workflow, daily_digest_workflow, weekly_digest_workflow],
+    workflows=WORKFLOWS,
     interfaces=interfaces,
     config=str(Path(__file__).parent / "config.yaml"),  # Quick prompts for the agents.
     # Enable JWT based authorization in production.

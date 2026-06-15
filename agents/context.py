@@ -14,11 +14,11 @@ from agno.utils.log import log_warning
 from agents.inbox import GUEST_TOOLS, acknowledge, rundown
 from agents.instructions import CONTEXT_INSTRUCTIONS, GUEST_GUIDE, OWNER_GUIDE
 from agents.policy import enforce_capture_only, normalize_identity
-from agents.reminders import queue_reminders
 from agents.sources import ACT_TOOLS, context_providers_summary, get_context_providers, list_contexts
 from app.identity import ANON_USER_ID, is_owner, owner_display_name
 from app.settings import default_model
 from db import get_postgres_db
+from workflows.reminders import queue_reminders
 
 # Runtime skills i.e. reusable playbooks the owner can invoke (e.g. the week plan).
 # Owner-gated like the provider tools: the access tools are added only in the

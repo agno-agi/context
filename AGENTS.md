@@ -28,9 +28,12 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 │
 ├── Inbound queue (agents/inbox.py)             submit_update / rundown / acknowledge
 │
-├── Reminder sweep (agents/reminders.py)        queue_reminders → inbound queue  (hourly workflow schedule, owner-only)
-├── Scheduled digests (agents/digest.py)        daily rundown / weekly week-plan → owner Slack DM (auto-armed when SLACK_BOT_TOKEN set)
-├── Owner notify (agents/notify.py)             dm_owner() — self-notification path shared by the reminder sweep + digests
+├── Workflows (workflows/ → WORKFLOWS)          runnable Agno Workflow objects (registered with AgentOS), owner-only
+│   ├── reminders (workflows/reminders.py)      hourly sweep: queue_reminders → inbound queue  (+ the queue_reminders owner tool)
+│   ├── digest    (workflows/digest.py)         daily rundown / weekly week-plan → owner Slack DM (auto-armed when SLACK_BOT_TOKEN set)
+│   └── notify    (workflows/notify.py)         dm_owner() — self-notification path shared by the sweep + digests
+│
+├── Schedules (app/schedules.py)                register_schedules() — cron that fires the workflows (hourly sweep; Slack-gated digests)
 │
 ├── Skills (skills/ + agents/context.py)        owner-only playbooks  week-plan / daily-rundown / prep-for / process-today
 │
@@ -57,14 +60,16 @@ Shared:
 | [`app/mcp.py`](app/mcp.py) | The owner-only MCP channel — a one-tool (`ask_context`) FastMCP server that runs the `context` agent as the owner; fail-closed `OwnerOnlyMiddleware` (JWT then owner check → 401) so it's never a guest path ([`docs/MCP.md`](docs/MCP.md)). |
 | [`app/settings.py`](app/settings.py) | `default_model()` factory. |
 | [`app/config.yaml`](app/config.yaml) | Quick prompts for the `context` agent. |
+| [`app/schedules.py`](app/schedules.py) | `register_schedules()` — the cron registration (idempotent; called from the lifespan): hourly `queue-reminders`, plus the Slack-gated `daily-digest` / `weekly-digest`. Cross-cutting (the scheduler can fire agents *or* workflows), so it lives here, not in `workflows/`. |
 | [`agents/context.py`](agents/context.py) | The `context` Agent — identity-conditioned `tools=` callable, identity-resolved prompt (`caller_information`), defense-in-depth hooks, owner-gated skills. |
 | [`agents/sources.py`](agents/sources.py) | Provider registry — builds/caches providers, async setup/close, `list_contexts`. |
 | [`agents/instructions.py`](agents/instructions.py) | `CONTEXT_INSTRUCTIONS` + the `crm` and `knowledge` read/write sub-agent prompts (`crm` rendered table-aware from the schema spec; `knowledge` specs-aware). |
 | [`agents/inbox.py`](agents/inbox.py) | The inbound queue — `submit_update` (everyone), `rundown` / `acknowledge` (owner-only). |
-| [`agents/reminders.py`](agents/reminders.py) | The reminder sweep — `_queue_reminders` claims due reminders and files them into the inbound queue. Exposed two ways: the `queue_reminders` owner tool (manual) and the `queue-reminders` workflow step (run hourly by the schedule, deterministically). Owner-only on both. |
-| [`agents/digest.py`](agents/digest.py) | The scheduled digests — `daily_digest_step` / `weekly_digest_step` run a read-only playbook (rundown / week-plan) as the owner and DM the result. Driven by the `daily-digest` / `weekly-digest` workflow schedules, which auto-arm when `SLACK_BOT_TOKEN` is set. |
-| [`agents/notify.py`](agents/notify.py) | `dm_owner()` — the shared, ungated self-notification path (DM the owner on Slack). Used by the reminder sweep and the digests. No-op unless a bot token + owner email are configured. |
 | [`agents/policy.py`](agents/policy.py) | Defense-in-depth hooks — `normalize_identity` (pre) + `enforce_capture_only` (tool). |
+| [`workflows/__init__.py`](workflows/__init__.py) | Exports `WORKFLOWS` — the list handed to `AgentOS(workflows=...)` in `app/main.py`. |
+| [`workflows/reminders.py`](workflows/reminders.py) | The reminder sweep — `_queue_reminders` claims due reminders and files them into the inbound queue. Exposed three ways: the `queue_reminders` owner tool (manual, wired onto the agent), the `queue_reminders_step`, and the `queue_reminders_workflow` (run hourly by the schedule, deterministically). Owner-only on every path. |
+| [`workflows/digest.py`](workflows/digest.py) | The scheduled digests — `daily_digest_step` / `weekly_digest_step` (+ the `daily_digest_workflow` / `weekly_digest_workflow` objects) run a read-only playbook (rundown / week-plan) as the owner and DM the result. Auto-arm when `SLACK_BOT_TOKEN` is set. |
+| [`workflows/notify.py`](workflows/notify.py) | `dm_owner()` — the shared, ungated self-notification path (DM the owner on Slack). Used by the reminder sweep and the digests. No-op unless a bot token + owner email are configured. |
 | [`skills/`](skills/) | Runtime skills — owner-only playbooks, one `SKILL.md` per folder (`week-plan`, `daily-rundown`, `prep-for`, `process-today`). Loaded + owner-gated by `context.py`; the agent uses them via progressive disclosure. |
 | [`.agents/skills/`](.agents/skills/) | Dev-time **coding-agent workflows** (`extend-agent`, `improve-agent`, `eval-and-improve`, `review-and-improve`) — slash commands coding agents run *on this repo*, distinct from the runtime skills above. `.claude/skills` is a committed symlink here — see "Working with coding agents". |
 | [`db/schema.py`](db/schema.py) | Single source for the structured store — `TABLES` renders the DDL (`create_tables()`, run at startup) *and* the agent's table-awareness. |
@@ -204,12 +209,12 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 
 ## Scheduler
 
-`scheduler=True` is on in [`app/main.py`](app/main.py), and `register_schedules()` registers schedules on every boot (idempotent). The reminder sweep always; the digests only when Slack is configured:
+`scheduler=True` is on in [`app/main.py`](app/main.py), and `register_schedules()` ([`app/schedules.py`](app/schedules.py)) registers schedules on every boot (idempotent), called from the lifespan. The reminder sweep always; the digests only when Slack is configured:
 
-- **`queue-reminders`** — hourly (on the hour, UTC), the schedule hits the `queue-reminders` workflow (`/workflows/queue-reminders/runs`), whose one step runs `_queue_reminders` ([`agents/reminders.py`](agents/reminders.py)) on the owner surface. It sweeps `crm.reminders` for anything now due and drops it into the inbound queue, where the next rundown surfaces it. `notified_at` is stamped (via an atomic claim) so each reminder fires exactly once. It's a workflow, not an agent run, so the sweep fires deterministically — nothing depends on a model choosing to call a tool.
-- **`daily-digest` / `weekly-digest`** — registered **only when `SLACK_BOT_TOKEN` is set** (delivery is a Slack DM, so there's no point otherwise). Each hits its digest workflow ([`agents/digest.py`](agents/digest.py)), which runs a read-only playbook as the owner (daily rundown, weekly week-plan) and DMs the result via `dm_owner` ([`agents/notify.py`](agents/notify.py)). Read-only, so no act tool fires; the DM is self-notification, so it's ungated and completes unattended. Timing is tunable via `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC; defaults `0 13 * * *` and `0 22 * * 0`).
+- **`queue-reminders`** — hourly (on the hour, UTC), the schedule hits the `queue-reminders` workflow (`/workflows/queue-reminders/runs`), whose one step runs `_queue_reminders` ([`workflows/reminders.py`](workflows/reminders.py)) on the owner surface. It sweeps `crm.reminders` for anything now due and drops it into the inbound queue, where the next rundown surfaces it. `notified_at` is stamped (via an atomic claim) so each reminder fires exactly once. It's a workflow, not an agent run, so the sweep fires deterministically — nothing depends on a model choosing to call a tool.
+- **`daily-digest` / `weekly-digest`** — registered **only when `SLACK_BOT_TOKEN` is set** (delivery is a Slack DM, so there's no point otherwise). Each hits its digest workflow ([`workflows/digest.py`](workflows/digest.py)), which runs a read-only playbook as the owner (daily rundown, weekly week-plan) and DMs the result via `dm_owner` ([`workflows/notify.py`](workflows/notify.py)). Read-only, so no act tool fires; the DM is self-notification, so it's ungated and completes unattended. Timing is tunable via `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC; defaults `0 13 * * *` and `0 22 * * 0`).
 
-Hand the scheduler any other agent / workflow + a cron expression to add more. Natural fits for `@context`:
+To add a workflow, drop a module in [`workflows/`](workflows/) (the `Workflow` object + its step executor) and include it in `WORKFLOWS`; then register a cron for it in [`app/schedules.py`](app/schedules.py). You can also point a schedule at any agent. Natural fits for `@context`:
 
 - **Maintenance** — purge acknowledged updates older than N days; vacuum tables.
 - **Periodic re-evaluation** — run `python -m evals` weekly to catch regressions.

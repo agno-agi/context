@@ -32,7 +32,9 @@ Three ways in, one core:
 
 Owner-only on every path. The tool and the workflow step both check `is_owner`
 (the scheduler's verified identity counts as the owner), so a guest never
-reaches the owner's reminders.
+reaches the owner's reminders. The `queue_reminders` tool is wired onto the
+context agent; the `queue_reminders_workflow` is registered with AgentOS and run
+by the hourly `queue-reminders` schedule (see `app/schedules.py`).
 """
 
 from datetime import datetime, timezone
@@ -40,12 +42,13 @@ from datetime import datetime, timezone
 from agno.exceptions import StopAgentRun
 from agno.run import RunContext
 from agno.tools import tool
-from agno.workflow.step import StepInput, StepOutput
+from agno.workflow.step import Step, StepInput, StepOutput
+from agno.workflow.workflow import Workflow
 from sqlalchemy import text
 
-from agents.notify import dm_owner
 from app.identity import CANONICAL_OWNER_ID, is_owner
-from db import SCHEMA, get_sql_engine
+from db import SCHEMA, get_postgres_db, get_sql_engine
+from workflows.notify import dm_owner
 
 _REMINDERS = f"{SCHEMA}.reminders"
 _UPDATES = f"{SCHEMA}.updates"
@@ -64,7 +67,7 @@ def _ping_owner_on_slack(due: list) -> None:
 
     The inbound queue is the source of truth — this is only a proactive nudge, so a
     failed DM never fails the sweep. Delivery (and the no-op-when-unconfigured
-    behaviour) lives in `agents.notify.dm_owner`; here we only format the message.
+    behaviour) lives in `workflows.notify.dm_owner`; here we only format the message.
     """
     lines = "\n".join(f"• {r.title} — due {_format_due(r.due_at)}" for r in due)
     header = f"🔔 *{len(due)} reminder{'' if len(due) == 1 else 's'} due*"
@@ -168,3 +171,18 @@ def queue_reminders_step(step_input: StepInput, run_context: RunContext) -> Step
     if not is_owner(run_context):
         return StepOutput(content="Queueing reminders is only available to the owner.")
     return StepOutput(content=_queue_reminders(notify_slack=True))
+
+
+# The reminder sweep as a one-step workflow. The hourly `queue-reminders`
+# schedule triggers it at /workflows/queue-reminders/runs, so the sweep fires
+# deterministically — no model deciding whether to call a tool. The step
+# re-checks is_owner (see queue_reminders_step above).
+queue_reminders_workflow = Workflow(
+    id="queue-reminders",
+    name="Queue Reminders",
+    description="Push due reminders into the owner's inbound queue.",
+    db=get_postgres_db(),
+    # Agno injects run_context into the step by name at runtime, but Step.executor's
+    # type only declares the single-arg (StepInput) form — hence the narrow ignore.
+    steps=[Step(name="queue-reminders", executor=queue_reminders_step)],  # type: ignore[arg-type]
+)

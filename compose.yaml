@@ -24,7 +24,7 @@ services:
     # Without this, edits under scripts/, tmp/ would restart uvicorn — disruptive when chatting.
     command: >
       uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-      --reload-dir agents --reload-dir app --reload-dir db --reload-dir skills
+      --reload-dir agents --reload-dir app --reload-dir db --reload-dir skills --reload-dir workflows
       --reload-include SKILL.md
     restart: unless-stopped
     ports:

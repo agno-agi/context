@@ -198,7 +198,7 @@ approval gate is reserved for the one genuinely sensitive outward action —
 mutating the calendar (email only ever drafts, so it isn't gated). This ungated messaging is exactly what
 lets contexts talk to each other, the context network — see [`docs/NETWORK.md`](NETWORK.md). (A
 scheduled **digest** rides a separate, also-ungated path: it DMs the owner
-*themselves* via `agents/notify.py`, which is self-notification, not an outward
+*themselves* via `workflows/notify.py`, which is self-notification, not an outward
 act.)
 
 The asymmetry extends cleanly: *anyone can write **to** your context; only you
