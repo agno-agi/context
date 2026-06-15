@@ -23,10 +23,9 @@ from agno.workflow import RemoteWorkflow, Workflow, WorkflowFactory
 from workflows.digest import daily_digest_workflow, weekly_digest_workflow
 from workflows.reminders import queue_reminders_workflow
 
-# The workflows registered with AgentOS. Order is cosmetic. The element type
-# matches AgentOS's `workflows=` parameter so the shared list types cleanly — a
-# bare list literal here would infer as the invariant `list[Workflow]` and be
-# rejected at the call site (it was only accepted inline via bidirectional inference).
+# The workflows registered with AgentOS (order is cosmetic). The explicit element
+# type matches AgentOS's `workflows=` parameter so the list types cleanly at the call
+# site (a bare list literal would infer as the invariant `list[Workflow]` and be rejected).
 WORKFLOWS: list[Workflow | RemoteWorkflow | WorkflowFactory] = [
     queue_reminders_workflow,
     daily_digest_workflow,
