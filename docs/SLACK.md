@@ -59,7 +59,7 @@ ngrok http 8000
             "always_online": true
         },
         "assistant_view": {
-            "assistant_description": "Capture, file, and retrieve your working context.",
+            "assistant_description": "Here to help.",
             "suggested_prompts": []
         }
     },
