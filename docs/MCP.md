@@ -176,7 +176,7 @@ python scripts/mint_mcp_jwt.py --write   # keypair (once) + signed admin token �
 python scripts/connect.py --production   # thread CONTEXT_MCP_JWT into your MCP clients
 ```
 
-Two wrappers save the steps: [`scripts/setup_production_mcp.sh`](../scripts/setup_production_mcp.sh) chains mint → `env-sync` → connect (no redeploy — use it to just rotate the token and rewire clients). [`scripts/setup_context.sh`](../scripts/setup_context.sh) is the full turnkey reset: `railway login` → reset client entries → mint (rotating the signing key) → `env-sync` → **`railway up` redeploy** (so a `railway.json` change like `numReplicas` lands) → wire all four clients → a "restart when you're ready" prompt. It never restarts your apps for you and never touches Postgres.
+One script saves the steps: [`scripts/setup_context.sh`](../scripts/setup_context.sh) is the single production front door — `railway login` → reset client entries → mint (rotating the signing key) → `env-sync` → **`railway up` redeploy** (so a `railway.json` change like `numReplicas` lands) → wire all four clients → a "restart when you're ready" prompt. It never restarts your apps for you and never touches Postgres. Add **`--no-redeploy`** to skip the `railway up` step when you just want to rotate the token and rewire clients.
 
 `env-sync.sh` pushes the public key but **skips `CONTEXT_MCP_JWT`** — the signing-grade token stays on your machine (read only by `connect.py`), never on the internet-facing box. The token starts verifying once Railway finishes redeploying with the new public key.
 

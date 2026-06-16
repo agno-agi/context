@@ -30,8 +30,8 @@ Usage (run in the venv — `source .venv/bin/activate`):
 
 After `--write`: run `./scripts/railway/env-sync.sh` (pushes the public key so the
 deploy trusts it — the token itself is kept local), then
-`python scripts/connect.py --production`. Or do all three with
-`./scripts/setup_production_mcp.sh`.
+`python scripts/connect.py --production`. Or do it all with
+`./scripts/setup_context.sh` (add `--no-redeploy` to skip the redeploy).
 """
 
 from __future__ import annotations
