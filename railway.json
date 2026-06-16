@@ -6,7 +6,7 @@
   },
   "deploy": {
     "runtime": "V2",
-    "numReplicas": 2,
+    "numReplicas": 1,
     "sleepApplication": false,
     "useLegacyStacker": false,
     "limits": {
