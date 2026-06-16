@@ -29,7 +29,7 @@ from agno.context.workspace import WorkspaceContextProvider
 from agno.run import RunContext
 from agno.tools import tool
 from agno.tools.workspace import DEFAULT_EXCLUDE_PATTERNS
-from agno.utils.log import log_info, log_warning
+from agno.utils.log import log_debug, log_info, log_warning
 
 from agents.instructions import (
     CALENDAR_READ,
@@ -248,7 +248,7 @@ def _create_slack_provider() -> SlackContextProvider | None:
     """
     if not getenv("SLACK_BOT_TOKEN"):
         return None
-    return SlackContextProvider(model=default_model(), read=True, write=True, read_instructions=SLACK_READ)
+    return SlackContextProvider(model=default_model(), read=True, write=True, read_instructions=SLACK_READ, stream_sub_agent_events=False)
 
 
 def _google_configured() -> bool:
@@ -258,6 +258,47 @@ def _google_configured() -> bool:
     tokens once with ``scripts/google_mint_tokens.py`` — see ``docs/GOOGLE.md``.
     """
     return bool(getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"))
+
+
+# Shared Google auth config — enables scope aggregation + encrypted DB storage
+_google_auth_config = None
+
+
+def _get_google_auth():
+    """Get shared Google AuthConfig with DB storage and encryption.
+
+    Lazily initialized to avoid import overhead when Google isn't configured.
+    Shared across Gmail + Calendar providers so OAuth scopes consolidate.
+    """
+    global _google_auth_config
+    if _google_auth_config is not None:
+        return _google_auth_config
+
+    if not _google_configured():
+        return None
+
+    try:
+        from agno.tools.google.auth import AuthConfig
+
+        from db import get_postgres_db
+
+        db = get_postgres_db()
+        encryption_key = getenv("GOOGLE_TOKEN_ENCRYPTION_KEY")
+
+        _google_auth_config = AuthConfig(
+            db=db,
+            token_encryption_key=encryption_key,
+        )
+
+        if encryption_key:
+            log_debug("Google auth: DB storage + encryption enabled")
+        else:
+            log_debug("Google auth: DB storage enabled (no encryption key)")
+
+        return _google_auth_config
+    except ImportError:
+        log_warning("Google auth: AuthConfig not available (google-api-python-client not installed)")
+        return None
 
 
 def gmail_token_path() -> str:
@@ -283,6 +324,11 @@ def _create_gmail_provider() -> ContextProvider | None:
     Imported lazily: the google client libraries are optional, and the
     registry's try/except treats a missing import as "provider not available"
     instead of taking the app down.
+
+    When ``GOOGLE_TOKEN_ENCRYPTION_KEY`` is set, OAuth tokens are encrypted
+    and stored in PostgreSQL instead of file-based ``token_path``. The shared
+    ``AuthConfig`` consolidates scopes across Gmail + Calendar, so a single
+    OAuth consent covers both.
     """
     if not _google_configured():
         return None
@@ -310,7 +356,9 @@ def _create_gmail_provider() -> ContextProvider | None:
                 toolkit.async_functions.pop(name, None)
             return toolkit
 
+    auth = _get_google_auth()
     return _DraftOnlyGmail(
+        auth=auth,
         model=default_model(),
         write=True,
         token_path=gmail_token_path(),
@@ -319,12 +367,18 @@ def _create_gmail_provider() -> ContextProvider | None:
 
 
 def _create_calendar_provider() -> ContextProvider | None:
-    """Google Calendar — read + write. ``update_calendar`` is approval-gated."""
+    """Google Calendar — read + write. ``update_calendar`` is approval-gated.
+
+    Uses shared ``AuthConfig`` with Gmail for consolidated OAuth scopes
+    and encrypted DB token storage.
+    """
     if not _google_configured():
         return None
     from agno.context.calendar import GoogleCalendarContextProvider
 
+    auth = _get_google_auth()
     return GoogleCalendarContextProvider(
+        auth=auth,
         model=default_model(),
         write=True,
         token_path=calendar_token_path(),
@@ -431,13 +485,8 @@ def _time_boxed_query_tool(original, timeout: float, precheck=None):
     return _query
 
 
-def _google_token_usable(token_path: str) -> bool:
-    """True iff a Google OAuth token is valid or can be refreshed without a browser.
-
-    Refreshes and persists an expired-but-refreshable token in place, so the provider's
-    sub-agent then loads a valid one. Never triggers interactive auth — a dead token
-    just returns False.
-    """
+def _google_token_usable_from_file(token_path: str) -> bool:
+    """True iff a file-based Google OAuth token is valid or can be refreshed."""
     p = Path(token_path)
     if not p.exists():
         return False
@@ -463,18 +512,60 @@ def _google_token_usable(token_path: str) -> bool:
     return False
 
 
+def _google_token_usable_from_db() -> bool:
+    """True iff a DB-stored Google OAuth token is valid or can be refreshed."""
+    auth = _get_google_auth()
+    if auth is None or auth.db is None:
+        return False
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+
+        from agno.utils.encryption import decrypt_dict, is_encrypted
+
+        row = auth.db.get_auth_token("google", None, "google")
+        if not row:
+            return False
+        token_data = row.get("token_data")
+        if not token_data:
+            return False
+        if is_encrypted(token_data):
+            token_data = decrypt_dict(token_data, key=auth.token_encryption_key)
+        creds = Credentials.from_authorized_user_info(token_data, row.get("granted_scopes") or [])
+    except Exception:
+        return False
+    if creds.valid:
+        return True
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            return bool(creds.valid)
+        except Exception:
+            return False
+    return False
+
+
 def _google_token_precheck(provider_id: str):
     """Build a precheck for `_time_boxed_query_tool` that skips Google reads on a dead token.
 
     Returns an async callable that yields ``None`` when the token is usable, or a one-line
     "skipped" chunk to short-circuit before the sub-agent spins up. The token check runs
     off the loop and is itself bounded, so a hung refresh can't stall the run either.
+
+    Checks DB-stored tokens first (when AuthConfig is configured), falling back to file.
     """
     token_path = gmail_token_path() if provider_id == "gmail" else calendar_token_path()
 
     async def _precheck():
         try:
-            usable = await asyncio.wait_for(asyncio.to_thread(_google_token_usable, token_path), timeout=8)
+            # 1. Check DB-stored token first (preferred when AuthConfig is configured)
+            auth = _get_google_auth()
+            if auth is not None and auth.db is not None:
+                usable = await asyncio.wait_for(asyncio.to_thread(_google_token_usable_from_db), timeout=8)
+                if usable:
+                    return None
+            # 2. Fall back to file-based token
+            usable = await asyncio.wait_for(asyncio.to_thread(_google_token_usable_from_file, token_path), timeout=8)
         except Exception:
             usable = False
         if usable:
