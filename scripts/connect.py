@@ -12,6 +12,9 @@ script does all of it for you, safely:
   - Codex        — runs `codex mcp add --url <url> <name>`
   - Claude Desktop — merges an `mcp-remote` bridge into claude_desktop_config.json
                      (absolute npx path, existing keys preserved, timestamped backup)
+  - Cursor       — merges a native remote entry ({url, headers}) into ~/.cursor/mcp.json
+                   (Cursor speaks streamable HTTP directly, so no mcp-remote bridge;
+                   existing keys preserved, timestamped backup)
 
 It only touches clients it finds, skips anything already wired up (idempotent),
 and never sends or reads anything — it just writes local client config.
@@ -58,7 +61,7 @@ from urllib.parse import urlparse
 DEFAULT_URL = "http://localhost:8000/mcp"
 DEFAULT_NAME = "context"
 SERVER_TOOL = "use_context"  # the single tool the server exposes; auto-allowed in Claude Code so it never prompts
-CLIENTS = ("claude-code", "codex", "claude-desktop")
+CLIENTS = ("claude-code", "codex", "claude-desktop", "cursor")
 
 # Production (`--production`): where to find the endpoint + the client's bearer token.
 ENV_FILE_DEFAULT = ".env.production"  # gitignored, so safe to hold the client JWT
@@ -78,6 +81,11 @@ def claude_desktop_config_path() -> Path:
     if sys.platform.startswith("win"):
         return Path(os.environ.get("APPDATA", home)) / "Claude" / "claude_desktop_config.json"
     return home / ".config" / "Claude" / "claude_desktop_config.json"
+
+
+def cursor_config_path() -> Path:
+    """Cursor's global MCP config path (same layout on every OS: ~/.cursor/mcp.json)."""
+    return Path.home() / ".cursor" / "mcp.json"
 
 
 def claude_code_settings_path() -> Path:
@@ -171,6 +179,76 @@ def _backup(path: Path) -> None:
 def _write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Cursor (config-file, native remote entry)
+# ---------------------------------------------------------------------------
+def _header_to_dict(header: str | None) -> dict[str, str]:
+    """Turn a single 'Key: Value' header string into a one-entry dict (for Cursor).
+
+    `header` is the same 'Authorization: Bearer <JWT>' form the other clients
+    take; Cursor wants it as a JSON object, so split on the first ': '.
+    """
+    if not header or ": " not in header:
+        return {}
+    key, _, value = header.partition(": ")
+    return {key.strip(): value.strip()}
+
+
+def cursor_entry(url: str, header: str | None = None) -> dict:
+    """The ~/.cursor/mcp.json server entry — a native streamable-HTTP remote.
+
+    Unlike Claude Desktop, Cursor speaks remote MCP directly: a `{url, headers}`
+    object, no `mcp-remote` stdio bridge (and so no npx dependency). For a local
+    instance there's no auth, so `headers` is omitted.
+    """
+    entry: dict = {"url": url}
+    headers = _header_to_dict(header)
+    if headers:
+        entry["headers"] = headers
+    return entry
+
+
+def connect_cursor(
+    url: str, name: str, config_path: Path, *, header: str | None = None, remove: bool, dry_run: bool
+) -> tuple[str, str]:
+    if not remove and not config_path.parent.exists():
+        return SKIP, "cursor: app not found (no ~/.cursor dir) — skipped"
+
+    config: dict = {}
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text() or "{}")
+        except json.JSONDecodeError as exc:
+            return FAIL, f"cursor: {config_path} is not valid JSON ({exc}) — left untouched"
+
+    servers = config.get("mcpServers", {})
+
+    if remove:
+        if name not in servers:
+            return SKIP, f"cursor: no '{name}' entry to remove"
+        if dry_run:
+            return OK, f"cursor: would remove '{name}' from {config_path}"
+        _backup(config_path)
+        servers.pop(name, None)
+        config["mcpServers"] = servers
+        _write_json(config_path, config)
+        return OK, f"cursor: removed '{name}' (restart Cursor)"
+
+    entry = cursor_entry(url, header)
+    if servers.get(name) == entry:
+        return SKIP, f"cursor: '{name}' already configured ({config_path})"
+
+    if dry_run:
+        action = "update" if name in servers else "add"
+        return OK, f"cursor: would {action} '{name}' in {config_path}\n      {json.dumps(entry)}"
+
+    _backup(config_path)
+    servers[name] = entry
+    config["mcpServers"] = servers
+    _write_json(config_path, config)
+    return OK, f"cursor: wrote '{name}' to {config_path} (restart Cursor)"
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +510,12 @@ def main() -> int:
                     url, args.name, desktop_config, header=header, remove=args.remove, dry_run=args.dry_run
                 )
             )
+        elif client == "cursor":
+            results.append(
+                connect_cursor(
+                    url, args.name, cursor_config_path(), header=header, remove=args.remove, dry_run=args.dry_run
+                )
+            )
         else:
             results.append(
                 connect_cli(
@@ -476,7 +560,10 @@ def main() -> int:
             )
 
     if not args.remove and not args.dry_run and any(g == OK for g, _ in results):
-        print("\nDone. Restart the Claude Desktop app if you configured it; CLI clients pick it up immediately.")
+        print(
+            "\nDone. Restart the desktop apps you configured (Claude Desktop, Cursor) to pick up the new"
+            " config; CLI clients (Claude Code, Codex) pick it up on their next run."
+        )
     return 1 if any(glyph == FAIL for glyph, _ in results) else 0
 
 

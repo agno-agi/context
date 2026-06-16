@@ -1,22 +1,40 @@
 # Scaling @context
 
 @context is a personal alter-ego — one person's context, one logical instance
-backed by one shared Postgres. But "one instance" isn't "one container": it
-ships on **two replicas** (`numReplicas: 2` in [`railway.json`](../railway.json),
-4Gi / 2 vCPU each), which is Agno's default Railway footprint. Two replicas buy
-two things a single container can't:
+backed by one shared Postgres. It ships on a **single replica**
+(`numReplicas: 1` in [`railway.json`](../railway.json), 4Gi / 2 vCPU), and that
+default is deliberate: the **remote MCP server needs it**.
 
-- **Zero-downtime rolling deploys** — one replica keeps serving while the other
-  restarts on a new build.
-- **Basic fault tolerance** — if one falls over, the other carries the traffic.
+## Why one replica (the MCP reason)
 
-For a service you talk to all day and that runs scheduled work in the
-background, that redundancy is the right default — it's about staying up, not
-horizontal scale for load. Both replicas share one Postgres (sessions, memory,
-the structured store, the queue), so they're interchangeable: any replica can
-serve any request, and the data layer needs nothing special.
+The owner's main way in is the MCP server (`use_context` / `ask_context` at
+`/mcp` — see [`docs/MCP.md`](MCP.md)). MCP's streamable-HTTP transport is
+**stateful**: the client opens a session (a POST that returns an
+`Mcp-Session-Id`) and then keeps a server→client SSE stream open against *that
+session*. The session lives **in memory on the replica that created it**.
 
-## What multiple replicas need — both already handled
+Railway's HTTP proxy load-balances across replicas with **no session affinity**
+(no sticky sessions). So with two replicas, the session created on replica A is
+unknown to replica B — the SSE stream and the next call get round-robined to the
+wrong replica and fail with **`Session not found` (-32600)** and intermittent
+**`502 Bad Gateway`** on the SSE stream. (AgentOS has no shared/cross-replica MCP
+session store today, so there's no in-app fix either.)
+
+With **one replica** that whole class of failure is impossible — every request
+lands on the one process that holds the session. For a single-owner personal
+agent that's the right trade: one container comfortably handles one person's
+traffic, the hourly reminder sweep, and the scheduled playbooks.
+
+The cost: you give up zero-downtime rolling deploys and basic fault tolerance —
+a deploy briefly drops the connection during the swap, and if the container
+falls over there's no second one to carry traffic. For a tool you restart
+rarely and talk to all day, a few seconds of downtime on deploy is a fine price
+for an MCP connection that doesn't flake.
+
+## The HA machinery is still here (harmless at one replica)
+
+Two things @context does so it *can* run on more than one replica safely are
+still wired in — they're no-ops at one replica, and ready if you scale up:
 
 - **A shared `INTERNAL_SERVICE_TOKEN`.** The scheduler authenticates its run
   triggers to AgentOS with this token. It's auto-generated per process, so if
@@ -38,24 +56,27 @@ token file at boot (see [`docs/GOOGLE.md`](GOOGLE.md)) and refreshes
 independently using the shared, stable refresh token — no coordination or
 shared volume needed.
 
-## Running more (or fewer)
+## Running more replicas
 
-Bump `numReplicas` and `limits` in [`railway.json`](../railway.json) as usage
-grows — say, putting @context in front of a whole team on Slack, or running
-heavy scheduled work alongside live traffic. Everything above still holds at
-three or four replicas; there's nothing new to configure.
+You *can* bump `numReplicas` and `limits` in [`railway.json`](../railway.json)
+for redundancy or to put @context in front of a whole team — the shared-token
+and scheduler arrangements above hold at three or four replicas with nothing new
+to configure.
 
-You *can* drop to `numReplicas: 1` to halve the cost if you don't need
-zero-downtime deploys — a single container handles one person's traffic, the
-hourly sweep, and scheduled playbooks without breaking a sweat. The token and
-scheduler arrangements above are harmless at one replica, so it's a pure config
-change.
+The **one caveat is the remote MCP server**: as above, it gets unreliable past
+one replica because Railway can't pin a session to a replica. So scale up only
+if you don't depend on the remote MCP path (e.g. you drive @context purely
+through Slack), or put session affinity in front of it yourself. Everything else
+— Slack, the schedules, the digests, the HTTP API — is happy at any replica
+count.
 
 ## Capacity vs. redundancy
 
 Replicas give you redundancy; they don't raise the ceiling for a single request.
-Each replica still has the same 4Gi / 2 vCPU limit, so if one is being
+Each replica still has the same 4Gi / 2 vCPU limit, so if the container is being
 OOM-killed or crash-looping, adding replicas won't fix it — raise
 `limits.memory` / `limits.cpu` in [`railway.json`](../railway.json) (or fix the
 underlying spike) instead. `railway logs --service agent-os` shows the restart
 reason.
+</content>
+</invoke>

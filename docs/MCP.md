@@ -42,9 +42,9 @@ python scripts/connect.py --dry-run  # preview, write nothing
 python scripts/connect.py --remove   # undo
 ```
 
-It detects Claude Code, Codex, and the Claude Desktop app and wires @context into each — running `claude mcp add` / `codex mcp add` for the CLIs and writing an `mcp-remote` bridge into `claude_desktop_config.json` for the desktop app (absolute `npx` path resolved, existing keys preserved, a timestamped backup made, anything already configured skipped). For Claude Code it also **always-allows** the `use_context` tool (adds `mcp__context__use_context` to `permissions.allow` in `~/.claude/settings.json`) so the agent never prompts you before calling it — see [Claude Code (CLI)](#claude-code-cli) below. Pure stdlib, so no venv needed. Useful flags: `--clients claude-code codex claude-desktop` to limit the set, `--url` for a non-default endpoint, `--config-path` to point at a non-standard desktop config.
+It detects Claude Code, Codex, the Claude Desktop app, and Cursor and wires @context into each — running `claude mcp add` / `codex mcp add` for the CLIs, writing an `mcp-remote` bridge into `claude_desktop_config.json` for the desktop app, and a native `{url, headers}` entry into `~/.cursor/mcp.json` for Cursor (absolute `npx` path resolved where a bridge is used, existing keys preserved, a timestamped backup made, anything already configured skipped). For Claude Code it also **always-allows** the `use_context` tool (adds `mcp__context__use_context` to `permissions.allow` in `~/.claude/settings.json`) so the agent never prompts you before calling it — see [Claude Code (CLI)](#claude-code-cli) below. Pure stdlib, so no venv needed. Useful flags: `--clients claude-code codex claude-desktop cursor` to limit the set, `--url` for a non-default endpoint, `--config-path` to point at a non-standard desktop config.
 
-**`--production`** targets your deployed instance: it reads `AGENTOS_URL` from `.env.production`, derives `https://<your-domain>/mcp`, and threads `Authorization: Bearer <JWT>` into every client for you. The JWT is read from `CONTEXT_MCP_JWT` in `.env.production`, else `--token <JWT>`, else you're prompted — and you **self-issue** that token rather than copying one from os.agno.com (see [Self-issued production token](#self-issued-production-token) below). Claude Code gets the token via `--header`; Codex via `--bearer-token-env-var CONTEXT_JWT` (so it stays out of Codex's config — `export CONTEXT_JWT=<JWT>` in your shell); Claude Desktop via the bridge's `--header`. Switching a client from local to prod? CLI clients match by name, so re-run with `--force`. The full setup — minting the token, what lands where — is in [Self-issued production token](#self-issued-production-token) below; the [README](../README.md#connect-production-context-mcp-server) has the one-command quick-start.
+**`--production`** targets your deployed instance: it reads `AGENTOS_URL` from `.env.production`, derives `https://<your-domain>/mcp`, and threads `Authorization: Bearer <JWT>` into every client for you. The JWT is read from `CONTEXT_MCP_JWT` in `.env.production`, else `--token <JWT>`, else you're prompted — and you **self-issue** that token rather than copying one from os.agno.com (see [Self-issued production token](#self-issued-production-token) below). Claude Code gets the token via `--header`; Codex via `--bearer-token-env-var CONTEXT_JWT` (so it stays out of Codex's config — `export CONTEXT_JWT=<JWT>` in your shell); Claude Desktop via the bridge's `--header`; Cursor via the `headers` block in `~/.cursor/mcp.json`. Switching a client from local to prod? CLI clients match by name, so re-run with `--force`. The full setup — minting the token, what lands where — is in [Self-issued production token](#self-issued-production-token) below; the [README](../README.md#connect-production-context-mcp-server) has the one-command quick-start.
 
 The per-client sections below are what it automates — reach for them to do it by hand, or to understand exactly what each form writes.
 
@@ -110,6 +110,23 @@ Restart the app and `use_context` shows up under the app's tools. (Verified: `mc
 
 **Why not the "Add custom connector" UI?** Recent Claude Desktop builds also offer **Settings → Connectors → Add custom connector (BETA)**. It's the wrong door for @context for two confirmed reasons: it **rejects `http://` URLs** ("URL must start with 'https'"), and its only auth option is **OAuth** (Client ID / Secret) — there's no field for the static `Authorization: Bearer <JWT>` our server uses, so even a deployed HTTPS instance won't authenticate through it. The config-file bridge above is the path that works: it takes the plain localhost URL and can carry a static bearer header.
 
+## Cursor
+
+Cursor speaks remote MCP **natively** — no `mcp-remote` bridge, no npx. `scripts/connect.py` writes this for you (it's one of the default clients); to do it by hand, add a `{url, headers}` entry to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "context": {
+      "url": "https://<your-domain>/mcp",
+      "headers": { "Authorization": "Bearer <JWT>" }
+    }
+  }
+}
+```
+
+Restart Cursor and `use_context` shows up under its MCP tools. For a local instance, drop the `headers` block and use `http://localhost:8000/mcp` (no auth in dev). Same self-issued token as everywhere else (see [Self-issued production token](#self-issued-production-token) below).
+
 ## ChatGPT desktop
 
 ChatGPT desktop has **no local MCP config** — there's no `claude_desktop_config.json` equivalent to write a stdio bridge into (verified on macOS by inspecting the app's support dir: only connectors/"Work with Apps" pairings, no `mcpServers`). It reaches MCP servers only as a **remote HTTPS connector**, so the one way to use @context from ChatGPT is a deployed or tunnelled HTTPS instance — the next section.
@@ -152,12 +169,14 @@ python scripts/mint_mcp_jwt.py --write   # keypair (once) + signed admin token �
 - Writes `CONTEXT_SELF_VERIFICATION_KEY` (public key) and `CONTEXT_MCP_JWT` (a signed token: `sub` = your `OWNER_ID`, `scopes: ["agent_os:admin"]`, one-year expiry) to `.env.production`.
 - `--rotate-key` regenerates the keypair (invalidates tokens minted with the old one); `--ttl-days N` and `--sub <id>` override the defaults.
 
-**Then push + wire** (or run all three at once with [`scripts/setup_production_mcp.sh`](../scripts/setup_production_mcp.sh)):
+**Then push + wire** (or run it all with one of the wrappers):
 
 ```sh
 ./scripts/railway/env-sync.sh           # push CONTEXT_SELF_VERIFICATION_KEY (the public key) to the deploy
 python scripts/connect.py --production   # thread CONTEXT_MCP_JWT into your MCP clients
 ```
+
+Two wrappers save the steps: [`scripts/setup_production_mcp.sh`](../scripts/setup_production_mcp.sh) chains mint → `env-sync` → connect (no redeploy — use it to just rotate the token and rewire clients). [`scripts/setup_context.sh`](../scripts/setup_context.sh) is the full turnkey reset: `railway login` → reset client entries → mint (rotating the signing key) → `env-sync` → **`railway up` redeploy** (so a `railway.json` change like `numReplicas` lands) → wire all four clients → a "restart when you're ready" prompt. It never restarts your apps for you and never touches Postgres.
 
 `env-sync.sh` pushes the public key but **skips `CONTEXT_MCP_JWT`** — the signing-grade token stays on your machine (read only by `connect.py`), never on the internet-facing box. The token starts verifying once Railway finishes redeploying with the new public key.
 
