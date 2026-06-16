@@ -254,26 +254,22 @@ See [`docs/SLACK.md`](docs/SLACK.md#moving-from-local-to-production) for full st
 
 ## Connect production @context MCP server
 
-Once @context is deployed (you have a Railway domain), point your MCP clients at the production endpoint instead of localhost. The deployed server is JWT-gated, so this needs a bearer token. For the MCP server, we mint our own token and push it to Railway. This is scripted end to end:
+Once @context is deployed (you have a Railway domain), point your MCP clients at the production endpoint instead of localhost. The deployed server is JWT-gated, so this needs a bearer token — for the MCP server, we mint our own and push it to Railway. One command does the whole thing:
 
 ```sh
-source .venv/bin/activate          # mint needs pyjwt + cryptography (in requirements)
-./scripts/setup_production_mcp.sh   # mint token → push public key → wire MCP clients
+source .venv/bin/activate     # mint needs pyjwt + cryptography (in requirements)
+./scripts/setup_context.sh    # login → mint token → push public key → redeploy → wire clients
 ```
 
-`setup_production_mcp.sh` runs three steps. Re-run it any time to rotate the token:
+[`scripts/setup_context.sh`](scripts/setup_context.sh) is the single front door. By default it does a full setup: checks `railway login`, mints a fresh token, pushes the public key, runs a `railway up` redeploy (so a `railway.json` change like `numReplicas` lands), wires Claude Code, Codex, Claude Desktop, and Cursor with the token, then tells you to restart your apps. It never restarts apps for you or touches your data. Re-run it any time to rotate the token — add **`--no-redeploy`** to skip the redeploy and just rotate the token + rewire clients.
+
+Under the hood it chains three pieces you can also run by hand:
 
 1. [`scripts/mint_mcp_jwt.py`](scripts/mint_mcp_jwt.py) — self-issues an RS256 keypair (private key stays local in gitignored `secrets/`) and writes the public key + a signed admin token to `.env.production`.
 2. [`scripts/railway/env-sync.sh`](scripts/railway/env-sync.sh) — pushes the **public** key to Railway so the deploy trusts your token (the token itself stays off the server).
 3. [`scripts/connect.py --production`](scripts/connect.py) — threads the token into Claude Code, Codex, Claude Desktop, and Cursor.
 
 You self-issue the token instead of copying one from os.agno.com, and @context trusts your key *alongside* the os.agno.com one — so the [AgentOS UI](#agentos-ui) keeps working too.
-
-**Want one command that also redeploys?** [`scripts/setup_context.sh`](scripts/setup_context.sh) is the full turnkey version — it adds a `railway login` check, resets stale client entries, and runs a `railway up` redeploy in the middle (so a `railway.json` change like `numReplicas` actually lands), then wires all four clients and tells you to restart your apps when you're ready. It never restarts apps for you or touches your data. Use `setup_production_mcp.sh` (above) when you just want to rotate the token and rewire clients without redeploying.
-
-```sh
-./scripts/setup_context.sh          # login → reset → mint → push key → redeploy → wire clients
-```
 
 See [`docs/MCP.md`](docs/MCP.md#self-issued-production-token) for the full details: where the token comes from, per-client specifics (Codex's `$CONTEXT_JWT`, switching local→prod), ChatGPT/Claude web, and how it's secured.
 

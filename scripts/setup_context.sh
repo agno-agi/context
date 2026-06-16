@@ -4,7 +4,9 @@
 #
 #    @context — turnkey: reset, deploy to production, wire every MCP client.
 #
-#    The one command to (re)connect @context end to end. Runs, in order:
+#    THE single command to (re)connect your MCP clients to the deployed
+#    @context — full reset + redeploy by default, or `--no-redeploy` for the
+#    lightweight "just rotate the token and rewire clients" path. Runs, in order:
 #
 #      0. Preflight        — venv python, Railway CLI, `railway login`, project link
 #      1. Reset clients    — connect.py --remove (clear any stale `context` entries)
@@ -14,7 +16,8 @@
 #                            the token itself stays local)
 #      4. Push to prod     — railway up (redeploys, applying numReplicas:1 from
 #                            railway.json — the single-replica fix that makes the
-#                            remote MCP session reliable; see docs/SCALING.md)
+#                            remote MCP session reliable; see docs/SCALING.md).
+#                            Skipped with --no-redeploy.
 #      5. Wire clients     — connect.py --production --force into Claude Code,
 #                            Codex, Claude Desktop, and Cursor (with the new token)
 #      6. Wait (optional)  — poll the deploy's /health so it can tell you when the
@@ -26,9 +29,11 @@
 #    Run from the repo root. The venv is auto-detected (or `source .venv/bin/activate`).
 #
 #    Usage:
-#      ./scripts/setup_context.sh [--no-rotate-key] [--no-wait] [--ttl-days N]
-#                                 [--clients "claude-code codex claude-desktop cursor"]
+#      ./scripts/setup_context.sh [--no-redeploy] [--no-rotate-key] [--no-wait]
+#                                 [--ttl-days N] [--clients "claude-code codex …"]
 #
+#      --no-redeploy     skip the `railway up` redeploy — just rotate the token
+#                        and rewire clients (the lightweight path)
 #      --no-rotate-key   reuse the existing signing key (just re-mint the token +
 #                        rewire); default is a full key rotation (clean slate)
 #      --no-wait         don't poll /health after the redeploy; exit immediately
@@ -53,17 +58,39 @@ cd "${REPO_ROOT}"
 # ---- args -----------------------------------------------------------------
 ROTATE_KEY=1
 WAIT_FOR_HEALTH=1
+REDEPLOY=1
 TTL_ARGS=()
 CLIENTS_ARG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --no-redeploy) REDEPLOY=0; shift ;;
         --no-rotate-key) ROTATE_KEY=0; shift ;;
         --no-wait) WAIT_FOR_HEALTH=0; shift ;;
         --ttl-days) TTL_ARGS+=(--ttl-days "${2:?--ttl-days needs a value}"); shift 2 ;;
         --ttl-days=*) TTL_ARGS+=("$1"); shift ;;
         --clients) CLIENTS_ARG="${2:?--clients needs a value}"; shift 2 ;;
         --clients=*) CLIENTS_ARG="${1#*=}"; shift ;;
-        -h|--help) sed -n '3,46p' "${BASH_SOURCE[0]}" | sed 's/^#//'; exit 0 ;;
+        -h|--help)
+            cat <<'USAGE'
+@context — connect every MCP client to the deployed instance (one command).
+
+Usage: ./scripts/setup_context.sh [options]
+
+  Default (full setup): railway login check -> reset stale client entries ->
+  mint a fresh token (rotating the signing key) -> push the public key ->
+  `railway up` redeploy (applies railway.json, e.g. numReplicas) -> wire
+  Claude Code, Codex, Claude Desktop, Cursor -> wait for /health -> tell you
+  to restart your apps. Never restarts apps for you; never touches Postgres.
+
+  --no-redeploy    skip the `railway up` redeploy — just rotate the token and
+                   rewire clients (env-sync still redeploys if the key changed)
+  --no-rotate-key  reuse the existing signing key instead of rotating it
+  --no-wait        don't poll /health after deploying; exit immediately
+  --ttl-days N     token lifetime in days (passed to the mint step)
+  --clients "..."  limit which clients get wired
+                   (default: claude-code codex claude-desktop cursor)
+USAGE
+            exit 0 ;;
         *) echo "error: unknown option '$1' (try $0 --help)" >&2; exit 2 ;;
     esac
 done
@@ -157,8 +184,14 @@ step "[3/6] Syncing the public key to Railway"
 ./scripts/railway/env-sync.sh
 
 # ---- 4. push to production ------------------------------------------------
-step "[4/6] Pushing to production (applies numReplicas from railway.json)"
-railway up --service agent-os -d
+if [[ "$REDEPLOY" == "1" ]]; then
+    step "[4/6] Pushing to production (applies numReplicas from railway.json)"
+    railway up --service agent-os -d
+else
+    step "[4/6] Skipping \`railway up\` (--no-redeploy)"
+    echo -e "  ${DIM}Just rotating the token + rewiring clients. (env-sync above still redeploys${NC}"
+    echo -e "  ${DIM}when the signing key changed, so the new token takes effect either way.)${NC}"
+fi
 
 # ---- 5. wire clients ------------------------------------------------------
 step "[5/6] Wiring the token into your MCP clients"
