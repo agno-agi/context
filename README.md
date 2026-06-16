@@ -80,7 +80,7 @@ Confirm it is live at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 ## MCP server
 
-The main way to use @context is from an MCP client like Claude Code, Codex, Claude, and ChatGPT. Connect your favorite AI tools to @context's MCP server at `http://localhost:8000/mcp`.
+The main way to use @context is from an MCP client like Claude Code, Codex, Claude, Cursor, and ChatGPT. Connect your favorite AI tools to @context's MCP server at `http://localhost:8000/mcp`.
 
 > Note: @context's MCP server is **owner-only**, so keep an eye on security.
 
@@ -92,7 +92,7 @@ Add @context to every MCP client on your machine with one command:
 python scripts/connect.py
 ```
 
-The script finds Claude Code, Codex, and the Claude Desktop app, and registers @context with each. Use `--dry-run` to preview and `--remove` to undo. Once you've deployed, the same script points your clients at the live instance — see [Connect production @context MCP server](#connect-production-context-mcp-server).
+The script finds Claude Code, Codex, the Claude Desktop app, and Cursor, and registers @context with each. Use `--dry-run` to preview and `--remove` to undo. Once you've deployed, the same script points your clients at the live instance — see [Connect production @context MCP server](#connect-production-context-mcp-server).
 
 ### Add @context to MCP clients manually
 
@@ -112,6 +112,18 @@ codex mcp add --url http://localhost:8000/mcp context                       # Co
     "context": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://localhost:8000/mcp", "--transport", "http-only"]
+    }
+  }
+}
+```
+
+**Cursor** speaks remote MCP directly (no bridge). Add this to `~/.cursor/mcp.json` and restart Cursor:
+
+```json
+{
+  "mcpServers": {
+    "context": {
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
@@ -253,9 +265,15 @@ source .venv/bin/activate          # mint needs pyjwt + cryptography (in require
 
 1. [`scripts/mint_mcp_jwt.py`](scripts/mint_mcp_jwt.py) — self-issues an RS256 keypair (private key stays local in gitignored `secrets/`) and writes the public key + a signed admin token to `.env.production`.
 2. [`scripts/railway/env-sync.sh`](scripts/railway/env-sync.sh) — pushes the **public** key to Railway so the deploy trusts your token (the token itself stays off the server).
-3. [`scripts/connect.py --production`](scripts/connect.py) — threads the token into Claude Code, Codex, and Claude Desktop.
+3. [`scripts/connect.py --production`](scripts/connect.py) — threads the token into Claude Code, Codex, Claude Desktop, and Cursor.
 
 You self-issue the token instead of copying one from os.agno.com, and @context trusts your key *alongside* the os.agno.com one — so the [AgentOS UI](#agentos-ui) keeps working too.
+
+**Want one command that also redeploys?** [`scripts/setup_context.sh`](scripts/setup_context.sh) is the full turnkey version — it adds a `railway login` check, resets stale client entries, and runs a `railway up` redeploy in the middle (so a `railway.json` change like `numReplicas` actually lands), then wires all four clients and tells you to restart your apps when you're ready. It never restarts apps for you or touches your data. Use `setup_production_mcp.sh` (above) when you just want to rotate the token and rewire clients without redeploying.
+
+```sh
+./scripts/setup_context.sh          # login → reset → mint → push key → redeploy → wire clients
+```
 
 See [`docs/MCP.md`](docs/MCP.md#self-issued-production-token) for the full details: where the token comes from, per-client specifics (Codex's `$CONTEXT_JWT`, switching local→prod), ChatGPT/Claude web, and how it's secured.
 
