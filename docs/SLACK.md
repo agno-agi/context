@@ -174,24 +174,24 @@ In your Slack app config, go to **Basic Information** → **Display Information*
 You can use this prompt as a starting point to generate an icon for your own @context app using ChatGPT.
 
 ```text
-A painterly, semi-realistic matte painting of an imagined city skyline at sunrise — warm, magical, and cinematic, in the style of a high-end animated-film background (Studio Ghibli / Disney concept art). Full-bleed square that fills the frame edge to edge — no border, no frame.
+A glowing, glassy diamond emblem floating at the center of a deep near-black navy background — minimal, modern, and luminous, like a premium app icon. Full-bleed square that fills the frame edge to edge — no border, no frame.
 
-Sky: a soft dawn of peach, rose, and pale lavender with gently painted clouds; the sun sits low on the horizon, washing warm golden light across the city.
+Shape: a single rounded-corner square rotated 45° so it reads as a diamond, centered with generous dark space around it. Smooth, soft-rounded corners; a clean translucent-glass surface with a subtle bevel and a bright highlight running along the upper-left edge.
 
-City: a cluster of elegant towers — art-deco crowns and ornate spires in warm cream and tan stone, their windows catching the gold of sunrise; one or two rooftops capped in jewel teal-blue as accents. A calm river winds through the middle, holding a shimmering golden reflection of the sun.
+Light: the diamond glows from within with a smooth gradient — cool cyan and electric blue at the top-left flowing into violet-purple at the bottom-right. A soft bloom of blue-purple light radiates outward into the dark; gentle inner reflections suggest polished glass.
 
-Foreground framing: a graceful tree branch with green leaves arcs across an upper corner; soft pink blossoms cascade down one side; lush green park trees and a few slender cypress line the bottom, tiny warm lamp-lights glowing among them. Gentle depth of field — crisp leaves up front, soft painterly city behind.
+Background: deep midnight navy, almost black, perfectly even — no texture, no other objects — so the glowing diamond is the only focus.
 
-Palette: warm gold and amber light, peach-and-rose sky, soft blossom pink, cream stone, deep park green, a single teal-blue accent.
+Palette: cyan, electric blue, and violet-purple on near-black navy.
 
-Square 1:1, balanced composition, rich depth, reads beautifully when Slack masks it to a rounded square.
+Square 1:1, centered composition, lots of negative space, reads beautifully when Slack masks it to a rounded square.
 
-Avoid: any real or recognizable city or landmark; text, letters, logos, watermarks; people in the foreground; harsh HDR; night; clutter.
+Avoid: text, letters, logos, watermarks; people; busy or textured backgrounds; harsh HDR; multiple shapes; hard outlines or a visible frame.
 ```
 
 After generating the icon, upload it to Slack (a square PNG, 512×512 or larger). Slack masks icons to a rounded square, so a full-bleed image — no border of its own — works best.
 
-Continue tweaking the prompt to taste: swap sunrise for blue-hour dusk, the blossoms for autumn maples, or the river for a harbor.
+Continue tweaking the prompt to taste: shift the gradient toward teal-green or magenta, soften or intensify the outer glow, or round the corners more for a softer, pill-like diamond.
 
 ## How it works
 
