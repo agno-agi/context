@@ -57,11 +57,17 @@ Pass `--force` to re-connect from scratch or to switch accounts.
 docker compose up -d
 ```
 
-## Deploying
+## Deploying (Railway)
 
-Tokens are encrypted and stored in PostgreSQL, so they persist across deploys automatically. No base64 env vars or file mounts needed.
+Tokens are encrypted and stored in PostgreSQL, so they persist across deploys automatically.
 
-Just ensure your production database has the token (run the mint script once pointing at your prod DB), and the same `GOOGLE_TOKEN_ENCRYPTION_KEY` is set in production.
+To mint directly to your production database:
+
+```bash
+railway run python scripts/google_mint_tokens.py
+```
+
+This injects your Railway env vars (including `DB_*`), opens the browser locally for OAuth, and saves the encrypted token to your prod DB.
 
 ## Verify
 
