@@ -2,12 +2,10 @@
 AgentOS Entrypoint
 ==================
 """
-# ruff: noqa: E402
-# load_dotenv() must run before other imports read env vars
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv()  # ruff: noqa: E402
 
 from contextlib import asynccontextmanager
 from os import getenv
