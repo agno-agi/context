@@ -30,24 +30,26 @@ Out of the box, Google puts a new app in **"Testing,"** and in that mode the log
 ### 3. Add the credentials to `.env`
 
 ```bash
+# Google OAuth
 GOOGLE_CLIENT_ID=***.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=***
-GOOGLE_PROJECT_ID=your-project-id
+
+# Token encryption (required) — generate with:
+#   python scripts/google_mint_tokens.py --generate-key
+GOOGLE_TOKEN_ENCRYPTION_KEY=***
 ```
 
 ### 4. Connect your account
 
-The consent screen opens a browser, so this runs on your machine, not in the container. From the repo root, with the venv active (`./scripts/venv_setup.sh` if you don't have one):
+The OAuth consent screen opens a browser, so this step runs on your machine (not in the container). From the repo root, with the venv active (`./scripts/venv_setup.sh` if you don't have one):
 
 ```bash
 python scripts/google_mint_tokens.py
 ```
 
-It reads `.env` (and `.env.production`, if you have one) and opens a browser to connect each service you haven't linked yet — Gmail, then Calendar; approve both — writing `gmail_token.json` / `calendar_token.json` at the repo root.
+It opens a browser to connect Gmail + Calendar. Approve both, and the encrypted token is saved to PostgreSQL.
 
-It prints the Google account each token is connected to, so you can confirm it's the right one. The dev container picks the token files up through the existing `.:/app` mount.
-
-Pass `--force` to re-mint from scratch or to connect a different account.
+Pass `--force` to re-connect from scratch or to switch accounts.
 
 ### 5. Restart
 
@@ -55,13 +57,11 @@ Pass `--force` to re-mint from scratch or to connect a different account.
 docker compose up -d
 ```
 
-## Deploying (Railway)
+## Deploying
 
-The tokens are stored in a file on the local filesystem. These files are gitignored and are not part of the image.
+Tokens are encrypted and stored in PostgreSQL, so they persist across deploys automatically. No base64 env vars or file mounts needed.
 
-But for production, we store the tokens as environment variables that are decoded by the entrypoint at startup.
-
-The `google_mint_tokens.py` script sets this up for you: once the tokens are written it base64s them into `GMAIL_TOKEN_JSON_B64` and `CALENDAR_TOKEN_JSON_B64` in `.env.production`, then offers to run `./scripts/railway/env-sync.sh` to push them to Railway. It only writes to `.env.production` — local dev reads the token files directly through the `.:/app` mount, so `.env` never needs them.
+Just ensure your production database has the token (run the mint script once pointing at your prod DB), and the same `GOOGLE_TOKEN_ENCRYPTION_KEY` is set in production.
 
 ## Verify
 
@@ -88,10 +88,10 @@ and it's booked, decline and nothing happens.
 Off by default on purpose — drafting keeps you in control and means nothing goes
 out unread. If you do want @context to send directly:
 
-1. In [`agents/sources.py`](../agents/sources.py), in `_create_gmail_provider`,
+1. In [`agents/providers/google.py`](../agents/providers/google.py), in `create_gmail_provider`,
    stop stripping the send tools (the `_DraftOnlyGmail` subclass) — or use
    `GmailContextProvider` directly.
-2. Add `update_gmail` to `ACT_TOOLS` in the same file, so every send **pauses
+2. Add `update_gmail` to `ACT_TOOLS` in [`agents/sources.py`](../agents/sources.py), so every send **pauses
    for your approval** the same way calendar changes do — never ship sending
    ungated.
 
@@ -104,17 +104,15 @@ approvals queue.
   credentials are set; a misconfig is logged and skipped (the app still starts).
   Check the startup logs for a `_create_gmail_provider failed` /
   `_create_calendar_provider failed` warning, and confirm `.env` has
-  `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`.
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_TOKEN_ENCRYPTION_KEY`.
 - **Access stopped working after about a week.** The app is still in "Testing" —
   do step 2 (Internal for Workspace, or Publish for personal), then re-run
-  `python scripts/google_mint_tokens.py --force` (it re-mints, rewrites the
-  base64, and offers the Railway sync).
+  `python scripts/google_mint_tokens.py --force`.
 - **`access_blocked` / "app isn't verified" during connect.** On a personal
   account, add your address as a **test user** on the consent screen, or finish
   publishing it (step 2). Clicking past the unverified notice is expected for
   your own app.
-- **A token got revoked.** Re-run the mint script with `--force` — it re-mints,
-  rewrites the base64, and offers the Railway sync.
+- **A token got revoked.** Re-run the mint script with `--force`.
 
 ## Scope it down
 
