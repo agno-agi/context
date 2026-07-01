@@ -3,6 +3,10 @@ AgentOS Entrypoint
 ==================
 """
 
+from dotenv import load_dotenv
+
+load_dotenv()  # ruff: noqa: E402
+
 from contextlib import asynccontextmanager
 from os import getenv
 from pathlib import Path

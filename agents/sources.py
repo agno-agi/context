@@ -1,56 +1,47 @@
 """
-Context's Provider Registry
-===========================
+Context Provider Registry
+=========================
 
-Wiring for the context providers available to Context. The structured database (`crm`), the knowledge base (`knowledge`), the workspace, and web are always on; Slack, Gmail, and Calendar are added when their credentials are set.
+Wiring for the context providers available to @context. The structured database
+(`crm`), the knowledge base (`knowledge`), the workspace, and web are always on;
+Slack, Gmail, and Calendar are added when their credentials are set.
 
-Each provider exposes at most two tools to the main agent — `query_<id>` and `update_<id>` — so the tool surface stays linear at 2N as sources grow.
+Each provider exposes at most two tools to the main agent — `query_<id>` and
+`update_<id>` — so the tool surface stays linear at 2N as sources grow.
 
-`ACT_TOOLS` is the canonical list of tools that act on the outside world *as the owner* and so are approval-gated (the run pauses for the owner's explicit OK before they execute). Only `update_calendar` qualifies. Two writes are deliberately excluded: `update_gmail` only ever drafts (never sends — private and reversible), and `update_slack` is ordinary messaging. Filing into your own store is frictionless; only the sensitive outward action is gated. See `docs/SECURITY.md`.
+Provider factories live in `agents/providers/`. This module handles:
+- Registry lifecycle (create, get, setup, close)
+- Tool hardening (time-boxing, prechecks)
+- Introspection (status, logging)
+
+`ACT_TOOLS` gates tools that act on the outside world as the owner. Only
+`update_calendar` qualifies. Two writes are deliberately excluded: `update_gmail`
+only ever drafts (never sends), and `update_slack` is ordinary messaging.
+See `docs/SECURITY.md`.
 """
 
 import asyncio
-import contextlib
-import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from os import getenv
-from pathlib import Path
 
-from agno.context.database import DatabaseContextProvider
-from agno.context.mode import ContextMode
 from agno.context.provider import ContextProvider
-from agno.context.slack import SlackContextProvider
-from agno.context.web.parallel import ParallelBackend
-from agno.context.web.parallel_mcp import ParallelMCPBackend
-from agno.context.web.provider import WebContextProvider
-from agno.context.wiki import FileSystemBackend, GitBackend, WikiContextProvider
-from agno.context.workspace import WorkspaceContextProvider
 from agno.run import RunContext
 from agno.tools import tool
-from agno.tools.workspace import DEFAULT_EXCLUDE_PATTERNS
 from agno.utils.log import log_info, log_warning
 
-from agents.instructions import (
-    CALENDAR_READ,
-    CRM_READ,
-    CRM_WRITE,
-    GMAIL_READ,
-    KNOWLEDGE_READ,
-    KNOWLEDGE_WRITE,
-    SLACK_READ,
+from agents.providers.core import (
+    create_crm_provider,
+    create_knowledge_provider,
+    create_web_provider,
+    create_workspace_provider,
 )
-from app.settings import backbone_query_timeout, default_model, provider_query_timeout
-from db import SCHEMA, get_readonly_engine, get_sql_engine
-
-# Workspace root for the always-on filesystem context. Hardcoded to the context repo so @context can answer questions about its own codebase out of the box.
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-# Knowledge-base root - where @context stores files. Filesystem-backed by default; set KNOWLEDGE_REPO_URL + KNOWLEDGE_GITHUB_TOKEN to switch to GitBackend at startup for durable storage with an audit trail.
-KNOWLEDGE_PATH = REPO_ROOT / "knowledge"
+from agents.providers.google import create_calendar_provider, create_gmail_provider, google_token_precheck
+from agents.providers.hardening import time_boxed_query_tool
+from agents.providers.slack import create_slack_provider
+from app.settings import backbone_query_timeout, provider_query_timeout
 
 # Tools that act on the outside world as the owner → approval-gated by gate_act_tools.
-# Only the calendar; gmail is draft-only, slack is ordinary messaging (see module docstring).
 ACT_TOOLS: frozenset[str] = frozenset({"update_calendar"})
 
 
@@ -80,15 +71,16 @@ context_providers: list[ContextProvider] = []
 def create_context_providers() -> list[ContextProvider]:
     """Build the registered context providers from env and cache them.
 
-    Optional builders are wrapped in try/except so one bad config doesn't take the whole registry down.
+    Optional builders are wrapped in try/except so one bad config doesn't take
+    the whole registry down.
     """
     configured: list[ContextProvider] = [
-        _create_web_provider(),
-        _create_workspace_provider(),
-        _create_crm_provider(),
-        _create_knowledge_provider(),
+        create_web_provider(),
+        create_workspace_provider(),
+        create_crm_provider(),
+        create_knowledge_provider(),
     ]
-    for factory in (_create_slack_provider, _create_gmail_provider, _create_calendar_provider):
+    for factory in (create_slack_provider, create_gmail_provider, create_calendar_provider):
         try:
             provider = factory()
         except Exception as exc:
@@ -153,341 +145,11 @@ async def close_context_providers() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Context Providers
+# Tool hardening
 # ---------------------------------------------------------------------------
-
-
-def _create_web_provider() -> WebContextProvider:
-    model = default_model()
-    if getenv("PARALLEL_API_KEY"):
-        return WebContextProvider(backend=ParallelBackend(), model=model)
-    return WebContextProvider(backend=ParallelMCPBackend(), model=model)
-
-
-def _create_workspace_provider() -> WorkspaceContextProvider:
-    # mode=tools exposes the read tools (list_files / search_content / read_file)
-    # straight to the main context agent instead of behind a nested sub-agent, so a
-    # codebase question is answered in the agent's own turn (one pass, bounded by its
-    # tool_call_limit) rather than paying a full sub-agent round-trip per file read.
-    # The usage guidance lives in OWNER_GUIDE (the agent never sees provider
-    # instructions); no per-source time-box is needed (see BACKBONE_SOURCES).
-    #
-    # agno's defaults already exclude .env*, .git, caches, etc. Also keep Google
-    # credential files out: in local dev compose mounts the repo at /app, so
-    # without this the owner's own agent could read the minted OAuth token (or a
-    # stray key file) back through read_file. (The image is clean — .dockerignore
-    # excludes them — this covers the mounted-dev case.)
-    return WorkspaceContextProvider(
-        root=REPO_ROOT,
-        model=default_model(),
-        mode=ContextMode.tools,
-        exclude_patterns=[*DEFAULT_EXCLUDE_PATTERNS, "*_token.json", "google-service-account.json"],
-    )
-
-
-def _create_crm_provider() -> DatabaseContextProvider:
-    """The CRM — the structured database, read + write over the `crm` schema.
-
-    The tuned instructions know the managed table shape (projects/meetings/reminders/notes/contacts), rendered from the schema spec.
-    """
-    return DatabaseContextProvider(
-        id="crm",
-        name="CRM",
-        sql_engine=get_sql_engine(),
-        readonly_engine=get_readonly_engine(),
-        schema=SCHEMA,
-        read_instructions=CRM_READ,
-        write_instructions=CRM_WRITE,
-        model=default_model(),
-    )
-
-
-def _create_knowledge_provider() -> WikiContextProvider:
-    """The knowledge base — read + write knowledge, organized folder-per-spec.
-
-    Filesystem-backed by default. Set `KNOWLEDGE_REPO_URL` AND `KNOWLEDGE_GITHUB_TOKEN` — ideally pointing at your specs repo — to switch to `GitBackend` for durable storage with an audit trail. Optional knobs: `KNOWLEDGE_BRANCH` (default `main`), `KNOWLEDGE_LOCAL_PATH`.
-    """
-    repo_url = getenv("KNOWLEDGE_REPO_URL", "").strip()
-    github_token = getenv("KNOWLEDGE_GITHUB_TOKEN", "").strip()
-
-    backend: FileSystemBackend | GitBackend
-    if repo_url and github_token:
-        backend = GitBackend(
-            repo_url=repo_url,
-            github_token=github_token,
-            branch=getenv("KNOWLEDGE_BRANCH", "main"),
-            local_path=getenv("KNOWLEDGE_LOCAL_PATH") or None,
-        )
-        log_info(f"Knowledge base: GitBackend ({repo_url})")
-    else:
-        if repo_url or github_token:
-            log_warning(
-                "Knowledge base: KNOWLEDGE_REPO_URL and KNOWLEDGE_GITHUB_TOKEN must both be set "
-                "to enable GitBackend; falling back to FileSystemBackend."
-            )
-        KNOWLEDGE_PATH.mkdir(parents=True, exist_ok=True)
-        backend = FileSystemBackend(path=KNOWLEDGE_PATH)
-
-    return WikiContextProvider(
-        id="knowledge",
-        name="Knowledge Base",
-        backend=backend,
-        read_instructions=KNOWLEDGE_READ,
-        write_instructions=KNOWLEDGE_WRITE,
-        model=default_model(),
-    )
-
-
-def _create_slack_provider() -> SlackContextProvider | None:
-    """Slack — read + write. `query_slack` reads channels/DMs; `update_slack` posts.
-
-    Note: `search.messages` needs a *user* token (`xoxp-`, scope `search:read`); a bot
-    token returns `not_allowed_token_type`. Agno hard-codes `enable_search_messages=True`
-    with no user-token slot, so search errors out and the read falls back to
-    channel/thread history. Pass a user token here to restore it.
-    """
-    if not getenv("SLACK_BOT_TOKEN"):
-        return None
-    return SlackContextProvider(model=default_model(), read=True, write=True, read_instructions=SLACK_READ)
-
-
-def _google_configured() -> bool:
-    """True when the Gmail/Calendar OAuth client is configured.
-
-    Set ``GOOGLE_CLIENT_ID`` + ``GOOGLE_CLIENT_SECRET`` and mint the consent
-    tokens once with ``scripts/google_mint_tokens.py`` — see ``docs/GOOGLE.md``.
-    """
-    return bool(getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"))
-
-
-def gmail_token_path() -> str:
-    """Where the Gmail OAuth token cache lives (``GMAIL_TOKEN_FILE`` or repo root).
-
-    The single source of truth for this path: the provider reads it, the mint
-    script (``scripts/google_mint_tokens.py``) writes it, and the entrypoint's
-    base64 materialization restores it on deploys that don't keep files.
-    """
-    return getenv("GMAIL_TOKEN_FILE") or str(REPO_ROOT / "gmail_token.json")
-
-
-def calendar_token_path() -> str:
-    """Where the Calendar OAuth token cache lives (``CALENDAR_TOKEN_FILE`` or repo root)."""
-    return getenv("CALENDAR_TOKEN_FILE") or str(REPO_ROOT / "calendar_token.json")
-
-
-def _create_gmail_provider() -> ContextProvider | None:
-    """Gmail — read + draft. ``update_gmail`` only ever creates a draft; it
-    never sends, so it is *not* an act tool and needs no approval gate (a draft
-    is private and reversible — you review and send from Gmail).
-
-    Imported lazily: the google client libraries are optional, and the
-    registry's try/except treats a missing import as "provider not available"
-    instead of taking the app down.
-    """
-    if not _google_configured():
-        return None
-    from agno.context.gmail import GmailContextProvider
-    from agno.tools.google.gmail import GmailTools
-
-    class _DraftOnlyGmail(GmailContextProvider):
-        """Lock the Gmail write surface to drafts — it can never send.
-
-        Agno's Gmail write sub-agent already drafts by default; we override the
-        toolkit hook to drop every outward-send tool, making drafts-only a hard
-        guarantee rather than a prompt convention.
-
-        To let @context send for you instead: use ``GmailContextProvider``
-        directly (drop this subclass) and add ``update_gmail`` to ``ACT_TOOLS``
-        so every send pauses for your approval, like the calendar. The
-        implications + steps are in ``docs/GOOGLE.md``.
-        """
-
-        def _build_write_toolkit(self) -> GmailTools:
-            toolkit = super()._build_write_toolkit()
-            # Strip the send tools; keep create_draft_email / update_draft.
-            for name in ("send_email", "send_email_reply", "send_draft"):
-                toolkit.functions.pop(name, None)
-                toolkit.async_functions.pop(name, None)
-            return toolkit
-
-    return _DraftOnlyGmail(
-        model=default_model(),
-        write=True,
-        token_path=gmail_token_path(),
-        read_instructions=GMAIL_READ,
-    )
-
-
-def _create_calendar_provider() -> ContextProvider | None:
-    """Google Calendar — read + write. ``update_calendar`` is approval-gated."""
-    if not _google_configured():
-        return None
-    from agno.context.calendar import GoogleCalendarContextProvider
-
-    return GoogleCalendarContextProvider(
-        model=default_model(),
-        write=True,
-        token_path=calendar_token_path(),
-        read_instructions=CALENDAR_READ,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Owner tool hardening
-# ---------------------------------------------------------------------------
-#
-# A rundown fans `use_context` out to several provider sub-agents back to back, and
-# agno puts no timeout around each one. We time-box every read here so a slow source
-# degrades to a one-line "skipped" and the rest of the brief still lands.
-#
-# Google reads get an extra guard: on a dead OAuth token we skip before spinning the
-# sub-agent, which also avoids agno's interactive browser-auth fallback (wrong on a
-# headless server). The token check uses only the public google.oauth2 API.
-
-
-def _timeout_error(label: str, timeout: float) -> str:
-    return json.dumps({"error": f"{label} timed out after {int(timeout)}s — skipped"})
-
-
-async def _drain_into(queue: asyncio.Queue, sentinel: object, make_call) -> None:
-    """Producer task: run a provider tool and push each chunk onto ``queue``.
-
-    A provider ``query_*`` entrypoint returns a coroutine; awaiting it yields either an
-    async generator of streamed events or a finished value. Running this in its own
-    task means a timeout cancels only the task — never the consumer or the calling
-    agent's tool flow — so a slow source can't corrupt the outer stream.
-    """
-    try:
-        res = make_call()
-        if inspect.iscoroutine(res):
-            res = await res
-        if inspect.isasyncgen(res):
-            async for chunk in res:
-                await queue.put(chunk)
-        else:
-            await queue.put(res)
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        await queue.put(json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
-    finally:
-        await queue.put(sentinel)
-
-
-async def _bounded_tool_call(make_call, timeout: float, label: str):
-    """Yield a provider tool's chunks under a total wall-clock ``timeout``.
-
-    The tool runs as an isolated producer task feeding a queue. On timeout we emit one
-    error chunk (the providers' own ``{"error": ...}`` shape) and cancel the producer.
-    The remaining budget also caps inter-chunk stalls, not just the total.
-    """
-    queue: asyncio.Queue = asyncio.Queue()
-    sentinel = object()
-    task = asyncio.create_task(_drain_into(queue, sentinel, make_call))
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    try:
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                yield _timeout_error(label, timeout)
-                return
-            try:
-                item = await asyncio.wait_for(queue.get(), timeout=remaining)
-            except (asyncio.TimeoutError, TimeoutError):
-                yield _timeout_error(label, timeout)
-                return
-            if item is sentinel:
-                return
-            yield item
-    finally:
-        if not task.done():
-            task.cancel()
-        with contextlib.suppress(BaseException):
-            await task
-
-
-def _time_boxed_query_tool(original, timeout: float, precheck=None):
-    """Wrap a provider ``query_*`` tool so its sub-agent run is time-boxed.
-
-    Same name + description; the explicit ``question`` / ``run_context`` signature keeps
-    agno's schema inference and run_context injection unchanged. The optional ``precheck``
-    (an async callable) runs first: if it returns a chunk, we yield that and skip the
-    sub-agent — the Google guard uses it to short-circuit on a dead token.
-    """
-    raw = original.entrypoint
-    label = original.name
-
-    @tool(name=original.name, description=original.description)
-    async def _query(question: str, run_context: RunContext | None = None):
-        if precheck is not None:
-            skip = await precheck()
-            if skip is not None:
-                yield skip
-                return
-        async for chunk in _bounded_tool_call(lambda: raw(question=question, run_context=run_context), timeout, label):
-            yield chunk
-
-    return _query
-
-
-def _google_token_usable(token_path: str) -> bool:
-    """True iff a Google OAuth token is valid or can be refreshed without a browser.
-
-    Refreshes and persists an expired-but-refreshable token in place, so the provider's
-    sub-agent then loads a valid one. Never triggers interactive auth — a dead token
-    just returns False.
-    """
-    p = Path(token_path)
-    if not p.exists():
-        return False
-    try:
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-
-        creds = Credentials.from_authorized_user_file(str(p))
-    except Exception:
-        return False
-    if creds.valid:
-        return True
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-        except Exception:
-            return False
-        try:
-            p.write_text(creds.to_json())
-        except Exception:
-            pass
-        return bool(creds.valid)
-    return False
-
-
-def _google_token_precheck(provider_id: str):
-    """Build a precheck for `_time_boxed_query_tool` that skips Google reads on a dead token.
-
-    Returns an async callable that yields ``None`` when the token is usable, or a one-line
-    "skipped" chunk to short-circuit before the sub-agent spins up. The token check runs
-    off the loop and is itself bounded, so a hung refresh can't stall the run either.
-    """
-    token_path = gmail_token_path() if provider_id == "gmail" else calendar_token_path()
-
-    async def _precheck():
-        try:
-            usable = await asyncio.wait_for(asyncio.to_thread(_google_token_usable, token_path), timeout=8)
-        except Exception:
-            usable = False
-        if usable:
-            return None
-        return json.dumps({"error": f"{provider_id} is unavailable right now (auth needs refresh) — skipped"})
-
-    return _precheck
-
 
 # Backbone read sources — the brief's spine. They get a longer per-source budget
-# than best-effort sources (see backbone_query_timeout) so they reliably land in the
-# concurrent fan-out, where best-effort sources still skip fast. Just the CRM today;
-# the inbound queue (`rundown`) isn't a query_* sub-agent, so it isn't time-boxed.
+# than best-effort sources so they reliably land in the concurrent fan-out.
 BACKBONE_SOURCES: frozenset[str] = frozenset({"crm"})
 
 
@@ -509,8 +171,8 @@ def owner_provider_tools() -> list:
                 tools.append(t)
                 continue
             timeout = backbone if ctx.id in BACKBONE_SOURCES else best_effort
-            precheck = _google_token_precheck(ctx.id) if ctx.id in ("gmail", "calendar") else None
-            tools.append(_time_boxed_query_tool(t, timeout, precheck))
+            precheck = google_token_precheck(ctx.id) if ctx.id in ("gmail", "calendar") else None
+            tools.append(time_boxed_query_tool(t, timeout, precheck))
     return tools
 
 
